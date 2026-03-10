@@ -35,7 +35,11 @@ class BotController {
     this.videoProcessor = new VideoProcessor();
     this.telegramHelper = new TelegramHelper(this.telegramApi.getMethodProxy());
     this.fileManager = new FileManager(config.TEMP_DIR, config.MERGE_TIMEOUT);
-    this.sponsorBlock = new SponsorBlock(config.SPONSORBLOCK_API_URL);
+    this.sponsorBlock = new SponsorBlock(config.SPONSORBLOCK_API_URL, {
+      maxRetries: config.TELEGRAM_API_MAX_RETRIES || 3,
+      baseDelay: config.TELEGRAM_API_BASE_DELAY || 1000,
+      maxDelay: config.TELEGRAM_API_MAX_DELAY || 10000
+    });
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
       config.RATE_LIMIT_WINDOW_MS

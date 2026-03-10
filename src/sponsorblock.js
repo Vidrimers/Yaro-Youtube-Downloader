@@ -6,8 +6,90 @@ const { Logger } = require('./utils');
  * Получает информацию о спонсорских блоках в YouTube видео
  */
 class SponsorBlock {
-  constructor(apiUrl = 'https://sponsor.ajay.app') {
+  constructor(apiUrl = 'https://sponsor.ajay.app', options = {}) {
     this.apiUrl = apiUrl;
+    this.maxRetries = options.maxRetries || 3;
+    this.baseDelay = options.baseDelay || 1000;
+    this.maxDelay = options.maxDelay || 10000;
+    this.retryableErrors = [
+      'ECONNRESET',
+      'ENOTFOUND', 
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'Client network socket disconnected',
+      'socket hang up',
+      'network timeout'
+    ];
+  }
+
+  /**
+   * Проверяет, является ли ошибка повторяемой
+   */
+  isRetryableError(error) {
+    if (!error) return false;
+    
+    const errorMessage = error.message || '';
+    const errorCode = error.code || '';
+    
+    return this.retryableErrors.some(retryableError => 
+      errorMessage.includes(retryableError) || errorCode === retryableError
+    );
+  }
+
+  /**
+   * Вычисляет задержку для retry с exponential backoff
+   */
+  calculateDelay(attempt) {
+    const delay = this.baseDelay * Math.pow(2, attempt);
+    return Math.min(delay, this.maxDelay);
+  }
+
+  /**
+   * Выполняет HTTP запрос с retry механизмом
+   */
+  async executeWithRetry(requestFn, context = {}) {
+    let lastError;
+    
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const result = await requestFn();
+        
+        if (attempt > 0) {
+          Logger.info('SponsorBlock request succeeded after retry', { 
+            attempt, 
+            ...context 
+          });
+        }
+        
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        
+        // Если это последняя попытка или ошибка не повторяемая
+        if (attempt === this.maxRetries || !this.isRetryableError(error)) {
+          Logger.error(`SponsorBlock request failed after ${attempt + 1} attempts`, error, {
+            isRetryable: this.isRetryableError(error),
+            ...context
+          });
+          throw error;
+        }
+        
+        // Логируем попытку retry
+        const delay = this.calculateDelay(attempt);
+        Logger.warn(`SponsorBlock request failed, retrying in ${delay}ms`, {
+          attempt: attempt + 1,
+          maxRetries: this.maxRetries,
+          error: error.message,
+          ...context
+        });
+        
+        // Ждем перед следующей попыткой
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError;
   }
 
   /**
@@ -17,33 +99,36 @@ class SponsorBlock {
    * @returns {Promise<Array>} - массив сегментов
    */
   async getSegments(videoId, categories = null) {
+    const params = {
+      videoID: videoId
+    };
+
+    // Если категории не указаны, используем основные
+    if (categories) {
+      params.categories = JSON.stringify(categories);
+    } else {
+      // Основные категории для удаления
+      params.categories = JSON.stringify([
+        'sponsor',      // Спонсорская реклама
+        'selfpromo',    // Самореклама
+        'interaction',  // Призыв к действию (лайк/подписка)
+        'intro',        // Интро/заставка
+        'outro',        // Аутро/титры
+        'preview',      // Превью/анонс
+        'music_offtopic' // Музыка не по теме
+      ]);
+    }
+
+    Logger.info('Fetching SponsorBlock segments', { videoId, categories: params.categories });
+
     try {
-      const params = {
-        videoID: videoId
-      };
-
-      // Если категории не указаны, используем основные
-      if (categories) {
-        params.categories = JSON.stringify(categories);
-      } else {
-        // Основные категории для удаления
-        params.categories = JSON.stringify([
-          'sponsor',      // Спонсорская реклама
-          'selfpromo',    // Самореклама
-          'interaction',  // Призыв к действию (лайк/подписка)
-          'intro',        // Интро/заставка
-          'outro',        // Аутро/титры
-          'preview',      // Превью/анонс
-          'music_offtopic' // Музыка не по теме
-        ]);
-      }
-
-      Logger.info('Fetching SponsorBlock segments', { videoId, categories: params.categories });
-
-      const response = await axios.get(`${this.apiUrl}/api/skipSegments`, {
-        params,
-        timeout: 10000
-      });
+      const response = await this.executeWithRetry(
+        () => axios.get(`${this.apiUrl}/api/skipSegments`, {
+          params,
+          timeout: 10000
+        }),
+        { videoId }
+      );
 
       // Отладка: показываем что именно запросили
       Logger.info('SponsorBlock request URL', { 
@@ -52,7 +137,7 @@ class SponsorBlock {
       });
 
       if (response.data && response.data.length > 0) {
-        const segments = response.data[0].segments || [];
+        const segments = response.data; // SponsorBlock возвращает массив сегментов напрямую
         Logger.info('SponsorBlock segments found', { 
           videoId, 
           segmentsCount: segments.length 
