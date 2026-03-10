@@ -16,7 +16,6 @@ server/uploads/
 succes-api/
 ytdldocs/
 
-
 # ФАЙЛЫ
 
 package-lock.json
@@ -43,3 +42,57 @@ server/scripts/migrate-*.js
 scripts/migrate-*.js
 cloudflared-tunnel*
 Порядок
+
+
+
+
+
+
+
+
+
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by testing tools
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PM2
+.pm2/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+

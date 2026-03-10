@@ -1,0 +1,33 @@
+{
+  "name": "youtube-downloader-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram бот для получения прямых ссылок на скачивание YouTube видео",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "youtube",
+    "downloader",
+    "yt-dlp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "fast-check": "^3.15.0",
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
