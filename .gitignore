@@ -1,0 +1,45 @@
+# ПАПКИ
+
+node_modules/
+dist/
+temp/
+.vscode/
+.DS_Store
+npm/
+backups/
+.kiro/
+roadmap/
+docs/
+logs/
+server/backups/
+server/uploads/
+succes-api/
+ytdldocs/
+
+
+# ФАЙЛЫ
+
+package-lock.json
+.env
+.env copy
+* copy*.js
+*-copy*.js
+*-copy*.db
+* copy*.db
+*.db
+*.db-wal
+*.db-shm
+rebel.db
+план.txt
+mytasks
+ngrok-tutor
+tuna-tutor
+tuna-config.yml
+*.log
+test-output.txt
+migration-*.sql
+server/src/database/migrations/*.js
+server/scripts/migrate-*.js
+scripts/migrate-*.js
+cloudflared-tunnel*
+Порядок

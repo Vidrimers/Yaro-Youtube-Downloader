@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient: deep dark with subtle blue -->
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0a0a14"/>
+    </radialGradient>
+
+    <!-- Red glow for YouTube emblem -->
+    <radialGradient id="redGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff3b30"/>
+      <stop offset="100%" stop-color="#c0392b"/>
+    </radialGradient>
+
+    <!-- Metallic arrow gradient -->
+    <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c8d6e5"/>
+    </linearGradient>
+
+    <!-- Glow filter for the red shape -->
+    <filter id="redBloom" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Soft glow filter for arrow -->
+    <filter id="arrowGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Outer ring shimmer -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff3b30" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#ff6b35" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#ff3b30" stop-opacity="0.8"/>
+    </linearGradient>
+
+    <clipPath id="circle">
+      <circle cx="256" cy="256" r="256"/>
+    </clipPath>
+  </defs>
+
+  <!-- Circular clip -->
+  <g clip-path="url(#circle)">
+
+    <!-- Background -->
+    <circle cx="256" cy="256" r="256" fill="url(#bgGrad)"/>
+
+    <!-- Subtle grid lines for depth -->
+    <g stroke="#ffffff" stroke-opacity="0.03" stroke-width="1">
+      <line x1="0" y1="128" x2="512" y2="128"/>
+      <line x1="0" y1="256" x2="512" y2="256"/>
+      <line x1="0" y1="384" x2="512" y2="384"/>
+      <line x1="128" y1="0" x2="128" y2="512"/>
+      <line x1="256" y1="0" x2="256" y2="512"/>
+      <line x1="384" y1="0" x2="384" y2="512"/>
+    </g>
+
+    <!-- Outer decorative ring -->
+    <circle cx="256" cy="256" r="220" fill="none" stroke="url(#ringGrad)" stroke-width="1.5" stroke-opacity="0.5"/>
+    <circle cx="256" cy="256" r="210" fill="none" stroke="#ff3b30" stroke-width="0.5" stroke-opacity="0.2"/>
+
+    <!-- YouTube rounded rectangle — glowing red -->
+    <rect x="118" y="178" width="276" height="174" rx="42" ry="42"
+          fill="url(#redGlow)" filter="url(#redBloom)"/>
+
+    <!-- Darker inner shadow on youtube rect -->
+    <rect x="118" y="178" width="276" height="174" rx="42" ry="42"
+          fill="none" stroke="#ff6060" stroke-width="1.5" stroke-opacity="0.4"/>
+
+    <!-- Play triangle (white) centered in the red box -->
+    <polygon points="220,228 220,298 306,263"
+             fill="white" opacity="0.95"/>
+
+    <!-- Download arrow group — positioned below center -->
+    <g filter="url(#arrowGlow)" transform="translate(256, 368)">
+      <!-- Vertical bar of arrow -->
+      <rect x="-13" y="-62" width="26" height="56" rx="8" fill="url(#arrowGrad)"/>
+      <!-- Arrowhead pointing down -->
+      <polygon points="-36,-10  36,-10  0,32" fill="url(#arrowGrad)"/>
+      <!-- Base line under arrow -->
+      <rect x="-40" y="38" width="80" height="13" rx="6.5" fill="url(#arrowGrad)"/>
+    </g>
+
+    <!-- "Yaro" text inscription -->
+    <defs>
+      <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#ff3b30"/>
+        <stop offset="50%" stop-color="#ff8c69"/>
+        <stop offset="100%" stop-color="#ff3b30"/>
+      </linearGradient>
+      <filter id="textGlow" x="-20%" y="-40%" width="140%" height="180%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    <!-- Shadow/glow layer -->
+    <text x="256" y="148" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="62" font-weight="700" letter-spacing="10"
+          fill="#ff3b30" opacity="0.25"
+          filter="url(#textGlow)">YARO</text>
+    <!-- Main text -->
+    <text x="256" y="148" text-anchor="middle"
+          font-family="Georgia, 'Times New Roman', serif"
+          font-size="62" font-weight="700" letter-spacing="10"
+          fill="url(#textGrad)" opacity="0.9">YARO</text>
+
+    <!-- Tiny sparkle dots around the icon for flair -->
+    <circle cx="148" cy="155" r="3" fill="#ff3b30" opacity="0.7"/>
+    <circle cx="364" cy="148" r="2" fill="#ff6b35" opacity="0.5"/>
+    <circle cx="390" cy="370" r="2.5" fill="#ff3b30" opacity="0.6"/>
+    <circle cx="122" cy="375" r="2" fill="#ff6b35" opacity="0.4"/>
+    <circle cx="256" cy="100" r="3" fill="#ff3b30" opacity="0.5"/>
+
+  </g>
+</svg>
