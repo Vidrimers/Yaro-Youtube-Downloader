@@ -251,16 +251,29 @@ class TelegramHelper {
    * @returns {Promise<void>}
    */
   async sendWelcome(chatId) {
-    const message = `👋 *Добро пожаловать!*\n\n` +
-                   `Я помогу вам получить прямые ссылки на скачивание YouTube видео.\n\n` +
-                   `*Как использовать:*\n` +
+    const message = `👋 <b>Добро пожаловать!</b>\n\n` +
+                   `Я помогу вам скачать YouTube видео с возможностью удаления рекламы.\n\n` +
+                   `<b>Как использовать:</b>\n` +
                    `1️⃣ Отправьте мне ссылку на YouTube видео\n` +
                    `2️⃣ Выберите нужное качество\n` +
-                   `3️⃣ Получите прямую ссылку для скачивания\n\n` +
+                   `3️⃣ Выберите что удалить из видео (реклама, интро и т.д.)\n` +
+                   `4️⃣ Получите готовое видео в Telegram или по ссылке\n\n` +
                    `Используйте /help для получения дополнительной информации.`;
 
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { 
+            text: '💝 Донатная', 
+            callback_data: 'donate_menu' 
+          }
+        ]
+      ]
+    };
+
     await this.bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown'
+      parse_mode: 'HTML',
+      reply_markup: keyboard
     });
   }
 
@@ -281,16 +294,105 @@ class TelegramHelper {
                    `• 480p (SD)\n` +
                    `• 360p\n` +
                    `• 240p\n\n` +
+                   `<b>Функции:</b>\n` +
+                   `🎯 Автоматическое обнаружение рекламных блоков\n` +
+                   `✂️ Удаление рекламы по категориям:\n` +
+                   `   • 📢 Реклама и самопродвижение\n` +
+                   `   • 🎬 Интро и аутро\n` +
+                   `   • 👆 Призывы к действию\n` +
+                   `   • 👀 Превью и анонсы\n` +
+                   `   • 🎵 Музыка не по теме\n` +
+                   `📥 Скачивание видео в Telegram или через файловый сервер\n\n` +
                    `<b>Команды:</b>\n` +
                    `/start - Начать работу с ботом\n` +
                    `/help - Показать эту справку\n\n` +
                    `<b>Ограничения:</b>\n` +
                    `• Максимум 5 запросов в минуту\n` +
-                   `• Ссылки действительны ограниченное время\n\n` +
-                   `⚠️ <b>Важно:</b> Бот не скачивает и не хранит видео, а только предоставляет прямые ссылки.`;
+                   `• Файлы до 100MB отправляются в Telegram\n` +
+                   `• Большие файлы доступны через временные ссылки\n\n` +
+                   `⚠️ <b>Важно:</b> Бот скачивает и обрабатывает видео для удаления рекламы. Файлы автоматически удаляются после отправки.`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { 
+            text: '💝 Донатная', 
+            callback_data: 'donate_menu' 
+          }
+        ]
+      ]
+    };
 
     await this.bot.sendMessage(chatId, message, {
-      parse_mode: 'HTML'
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
+  }
+
+  /**
+   * Отправляет меню донатов
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendDonateMenu(chatId) {
+    const message = `💝 <b>Поддержать проект</b>\n\n` +
+                   `Если вам нравится бот и вы хотите поддержать его развитие, вы можете сделать донат.\n\n` +
+                   `Ваша поддержка поможет:\n` +
+                   `• Оплачивать серверы для обработки видео\n` +
+                   `• Добавлять новые функции\n` +
+                   `• Поддерживать стабильную работу\n\n` +
+                   `Выберите удобный способ доната:`;
+
+    const config = require('../config/config');
+    const keyboard = { inline_keyboard: [] };
+
+    // DonationAlerts (всегда первый)
+    if (config.DONATION_ALERTS_URL) {
+      keyboard.inline_keyboard.push([{
+        text: '🎁 DonationAlerts',
+        url: config.DONATION_ALERTS_URL
+      }]);
+    }
+
+    // Криптовалютные кнопки
+    const cryptoButtons = [];
+    
+    if (config.KASPA_ADDRESS) {
+      cryptoButtons.push({
+        text: '💎 Kaspa',
+        callback_data: 'donate_kaspa'
+      });
+    }
+    
+    if (config.TON_ADDRESS) {
+      cryptoButtons.push({
+        text: '💠 TON',
+        callback_data: 'donate_ton'
+      });
+    }
+    
+    if (config.USDT_ADDRESS) {
+      cryptoButtons.push({
+        text: '💵 USDT (TRC-20)',
+        callback_data: 'donate_usdt'
+      });
+    }
+
+    // Добавляем криптовалютные кнопки (по 2 в ряд)
+    for (let i = 0; i < cryptoButtons.length; i += 2) {
+      const row = cryptoButtons.slice(i, i + 2);
+      keyboard.inline_keyboard.push(row);
+    }
+
+    // Кнопка "Назад"
+    keyboard.inline_keyboard.push([{
+      text: '◀️ Назад',
+      callback_data: 'back_to_main'
+    }]);
+
+    await this.bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard
     });
   }
 
@@ -303,6 +405,112 @@ class TelegramHelper {
   escapeMarkdown(text) {
     if (!text) return '';
     return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  }
+
+  /**
+   * Отправляет адрес Kaspa кошелька
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendKaspaAddress(chatId) {
+    const config = require('../config/config');
+    
+    if (!config.KASPA_ADDRESS) {
+      await this.bot.sendMessage(chatId, '❌ Kaspa адрес не настроен', {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '◀️ Назад', callback_data: 'donate_menu' }
+          ]]
+        }
+      });
+      return;
+    }
+
+    const message = `💎 <b>Kaspa (KAS)</b>\n\n` +
+                   `Адрес кошелька:\n` +
+                   `<code>${config.KASPA_ADDRESS}</code>\n\n` +
+                   `📋 Нажмите на адрес, чтобы скопировать\n\n` +
+                   `ℹ️ Kaspa - это быстрая и масштабируемая криптовалюта с мгновенными транзакциями`;
+
+    await this.bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '◀️ Назад к донатам', callback_data: 'donate_menu' }]
+        ]
+      }
+    });
+  }
+
+  /**
+   * Отправляет адрес TON кошелька
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendTonAddress(chatId) {
+    const config = require('../config/config');
+    
+    if (!config.TON_ADDRESS) {
+      await this.bot.sendMessage(chatId, '❌ TON адрес не настроен', {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '◀️ Назад', callback_data: 'donate_menu' }
+          ]]
+        }
+      });
+      return;
+    }
+
+    const message = `💠 <b>TON (Toncoin)</b>\n\n` +
+                   `Адрес кошелька:\n` +
+                   `<code>${config.TON_ADDRESS}</code>\n\n` +
+                   `📋 Нажмите на адрес, чтобы скопировать\n\n` +
+                   `ℹ️ TON - это блокчейн от создателей Telegram с низкими комиссиями`;
+
+    await this.bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '◀️ Назад к донатам', callback_data: 'donate_menu' }]
+        ]
+      }
+    });
+  }
+
+  /**
+   * Отправляет адрес USDT кошелька
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendUsdtAddress(chatId) {
+    const config = require('../config/config');
+    
+    if (!config.USDT_ADDRESS) {
+      await this.bot.sendMessage(chatId, '❌ USDT адрес не настроен', {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '◀️ Назад', callback_data: 'donate_menu' }
+          ]]
+        }
+      });
+      return;
+    }
+
+    const message = `💵 <b>USDT (TRC-20)</b>\n\n` +
+                   `Адрес кошелька:\n` +
+                   `<code>${config.USDT_ADDRESS}</code>\n\n` +
+                   `📋 Нажмите на адрес, чтобы скопировать\n\n` +
+                   `⚠️ <b>Важно:</b> Используйте только сеть TRON (TRC-20)!\n` +
+                   `Отправка через другие сети приведет к потере средств.`;
+
+    await this.bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '◀️ Назад к донатам', callback_data: 'donate_menu' }]
+        ]
+      }
+    });
   }
 
   /**

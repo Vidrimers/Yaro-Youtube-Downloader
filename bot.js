@@ -306,6 +306,46 @@ class BotController {
     Logger.userAction(userId, username, 'callback query', { data: callbackData });
     
     try {
+      // Проверяем, является ли это донатной командой
+      if (callbackData === 'donate_menu') {
+        await this.telegramHelper.sendDonateMenu(chatId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю меню донатов' });
+        return;
+      }
+      
+      if (callbackData === 'donate_coming_soon') {
+        await this.telegramApi.answerCallbackQuery(query.id, { 
+          text: 'Способы доната будут добавлены в ближайшее время!', 
+          show_alert: true 
+        });
+        return;
+      }
+      
+      if (callbackData === 'back_to_main') {
+        await this.telegramHelper.sendWelcome(chatId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Возвращаемся в главное меню' });
+        return;
+      }
+      
+      // Проверяем криптовалютные донаты
+      if (callbackData === 'donate_kaspa') {
+        await this.telegramHelper.sendKaspaAddress(chatId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю Kaspa адрес' });
+        return;
+      }
+      
+      if (callbackData === 'donate_ton') {
+        await this.telegramHelper.sendTonAddress(chatId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю TON адрес' });
+        return;
+      }
+      
+      if (callbackData === 'donate_usdt') {
+        await this.telegramHelper.sendUsdtAddress(chatId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю USDT адрес' });
+        return;
+      }
+      
       // Проверяем, является ли это SponsorBlock командой
       if (callbackData.startsWith('sb_')) {
         await this.handleSponsorBlockCallback(query);

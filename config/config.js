@@ -55,6 +55,12 @@ class Config {
     this.TELEGRAM_API_MAX_RETRIES = 3; // Максимум попыток retry для Telegram API
     this.TELEGRAM_API_BASE_DELAY = 1000; // Базовая задержка между попытками (мс)
     this.TELEGRAM_API_MAX_DELAY = 10000; // Максимальная задержка между попытками (мс)
+    
+    // Донаты
+    this.DONATION_ALERTS_URL = 'https://dalink.to/v1drimers'; // DonationAlerts ссылка
+    this.KASPA_ADDRESS = null; // Kaspa адрес
+    this.TON_ADDRESS = null; // TON адрес
+    this.USDT_ADDRESS = null; // USDT (TRC-20) адрес
   }
 
   /**
@@ -231,6 +237,23 @@ class Config {
         this.TELEGRAM_API_MAX_DELAY = delay;
       }
     }
+    
+    // Донаты настройки
+    if (process.env.DONATION_ALERTS_URL) {
+      this.DONATION_ALERTS_URL = process.env.DONATION_ALERTS_URL;
+    }
+    
+    if (process.env.KASPA_ADDRESS) {
+      this.KASPA_ADDRESS = process.env.KASPA_ADDRESS;
+    }
+    
+    if (process.env.TON_ADDRESS) {
+      this.TON_ADDRESS = process.env.TON_ADDRESS;
+    }
+    
+    if (process.env.USDT_ADDRESS) {
+      this.USDT_ADDRESS = process.env.USDT_ADDRESS;
+    }
   }
 
   /**
@@ -320,7 +343,11 @@ class Config {
       SPONSORBLOCK_ENABLED: this.SPONSORBLOCK_ENABLED,
       TELEGRAM_API_MAX_RETRIES: this.TELEGRAM_API_MAX_RETRIES,
       TELEGRAM_API_BASE_DELAY: this.TELEGRAM_API_BASE_DELAY,
-      TELEGRAM_API_MAX_DELAY: this.TELEGRAM_API_MAX_DELAY
+      TELEGRAM_API_MAX_DELAY: this.TELEGRAM_API_MAX_DELAY,
+      DONATION_ALERTS_URL: this.DONATION_ALERTS_URL,
+      KASPA_ADDRESS: this.KASPA_ADDRESS,
+      TON_ADDRESS: this.TON_ADDRESS,
+      USDT_ADDRESS: this.USDT_ADDRESS
     };
   }
 }
