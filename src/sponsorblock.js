@@ -257,14 +257,67 @@ class SponsorBlock {
    */
   static getCategories() {
     return {
-      sponsor: { name: 'Спонсорская реклама', emoji: '📢', default: true },
+      sponsor: { name: 'Реклама', emoji: '📢', default: true },
       selfpromo: { name: 'Самореклама', emoji: '📣', default: true },
-      interaction: { name: 'Призыв к действию', emoji: '👆', default: true },
+      interaction: { name: 'Призыв к действию', emoji: '👆', default: false },
       intro: { name: 'Интро', emoji: '🎬', default: false },
       outro: { name: 'Аутро', emoji: '🎭', default: false },
-      preview: { name: 'Превью', emoji: '👀', default: true },
+      preview: { name: 'Превью', emoji: '👀', default: false },
       music_offtopic: { name: 'Музыка не по теме', emoji: '🎵', default: false }
     };
+  }
+
+  /**
+   * Получить группы категорий для быстрого выбора
+   * @returns {Object} - объект с группами
+   */
+  static getCategoryGroups() {
+    return {
+      ads: {
+        name: '📢 Реклама',
+        categories: ['sponsor', 'selfpromo'],
+        description: 'Убрать спонсорскую рекламу и самопродвижение'
+      },
+      intro_outro: {
+        name: '🎬 Интро+Аутро', 
+        categories: ['intro', 'outro'],
+        description: 'Убрать заставки и титры'
+      },
+      interaction: {
+        name: '👆 Призывы к действию',
+        categories: ['interaction'],
+        description: 'Убрать призывы лайкать и подписываться'
+      },
+      preview: {
+        name: '👀 Превью',
+        categories: ['preview'],
+        description: 'Убрать анонсы и превью'
+      },
+      music_offtopic: {
+        name: '🎵 Музыка не по теме',
+        categories: ['music_offtopic'],
+        description: 'Убрать музыку не относящуюся к теме'
+      },
+      all: {
+        name: '🗑️ Убрать все блоки',
+        categories: ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'music_offtopic'],
+        description: 'Убрать все найденные блоки'
+      }
+    };
+  }
+
+  /**
+   * Фильтровать сегменты по категориям
+   * @param {Array} segments - все сегменты
+   * @param {Array} categories - категории для включения
+   * @returns {Array} - отфильтрованные сегменты
+   */
+  filterSegmentsByCategories(segments, categories) {
+    if (!segments || !categories || categories.length === 0) {
+      return [];
+    }
+    
+    return segments.filter(segment => categories.includes(segment.category));
   }
 }
 

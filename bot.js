@@ -1053,26 +1053,30 @@ class BotController {
     const callbackData = query.data;
 
     try {
-      // Парсим SponsorBlock команду: sb_action_formatId_videoId_quality
+      // Парсим SponsorBlock команду: sb_action_formatId_videoId_quality или sb_group_groupName_formatId_videoId_quality
       const parts = callbackData.split('_');
       if (parts.length < 5) {
         throw new Error('Invalid SponsorBlock callback format');
       }
 
-      const action = parts[1]; // remove или keep
-      const formatId = parts[2];
-      const videoId = parts[3];
-      const quality = parts[4];
+      const action = parts[1]; // remove, keep или group
+      
+      if (action === 'group') {
+        // Новая логика для групп категорий: sb_group_groupName_formatId_videoId_quality
+        if (parts.length < 6) {
+          throw new Error('Invalid SponsorBlock group callback format');
+        }
+        
+        const groupName = parts[2];
+        const formatId = parts[3];
+        const videoId = parts[4];
+        const quality = parts[5];
+        
+        Logger.info('Processing SponsorBlock group callback', { 
+          userId, groupName, formatId, videoId, quality 
+        });
 
-      Logger.info('Processing SponsorBlock callback', { 
-        userId, action, formatId, videoId, quality 
-      });
-
-      const url = `https://www.youtube.com/watch?v=${videoId}`;
-
-      if (action === 'keep') {
-        // Скачать как есть - используем обычную логику
-        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Скачиваю как есть...' });
+        const url = `https://www.youtube.com/watch?v=${videoId}`;
         
         // Получаем информацию о видео
         const videoInfo = await this.videoProcessor.getVideoInfo(url);
@@ -1082,32 +1086,86 @@ class BotController {
           throw new Error('FORMAT_NOT_FOUND');
         }
 
-        // Запускаем обычное скачивание
-        await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
-
-      } else if (action === 'remove') {
-        // Убрать рекламу
-        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Убираю рекламу и скачиваю...' });
+        // Получаем все сегменты
+        const allSegments = await this.sponsorBlock.getSegments(videoId);
         
-        // Получаем информацию о видео и сегменты
-        const videoInfo = await this.videoProcessor.getVideoInfo(url);
-        const format = videoInfo.formats.find(f => f.format_id === formatId);
-        
-        if (!format) {
-          throw new Error('FORMAT_NOT_FOUND');
+        if (!allSegments || allSegments.length === 0) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Сегменты не найдены, скачиваю как есть...' });
+          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
+          return;
         }
 
-        const segments = await this.sponsorBlock.getSegments(videoId);
+        // Получаем категории для группы
+        const SponsorBlock = require('./src/sponsorblock');
+        const categoryGroups = SponsorBlock.getCategoryGroups();
+        const group = categoryGroups[groupName];
         
-        if (!segments || segments.length === 0) {
-          // Нет сегментов для удаления, скачиваем как есть
-          await this.telegramApi.sendMessage(chatId, 
-            'ℹ️ Рекламные блоки не найдены, скачиваю как есть'
-          );
+        if (!group) {
+          throw new Error('UNKNOWN_GROUP');
+        }
+
+        // Фильтруем сегменты по категориям группы
+        const filteredSegments = this.sponsorBlock.filterSegmentsByCategories(allSegments, group.categories);
+        
+        if (filteredSegments.length === 0) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Нет сегментов для удаления, скачиваю как есть...' });
           await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
         } else {
-          // Есть сегменты, скачиваем с удалением рекламы
-          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, true, segments);
+          await this.telegramApi.answerCallbackQuery(query.id, { text: `Убираю ${group.name.toLowerCase()} и скачиваю...` });
+          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, true, filteredSegments);
+        }
+        
+      } else {
+        // Старая логика для keep/remove
+        const formatId = parts[2];
+        const videoId = parts[3];
+        const quality = parts[4];
+
+        Logger.info('Processing SponsorBlock callback', { 
+          userId, action, formatId, videoId, quality 
+        });
+
+        const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+        if (action === 'keep') {
+          // Скачать как есть - используем обычную логику
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Скачиваю как есть...' });
+          
+          // Получаем информацию о видео
+          const videoInfo = await this.videoProcessor.getVideoInfo(url);
+          const format = videoInfo.formats.find(f => f.format_id === formatId);
+          
+          if (!format) {
+            throw new Error('FORMAT_NOT_FOUND');
+          }
+
+          // Запускаем обычное скачивание
+          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
+
+        } else if (action === 'remove') {
+          // Убрать рекламу (старая логика - убираем все)
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Убираю рекламу и скачиваю...' });
+          
+          // Получаем информацию о видео и сегменты
+          const videoInfo = await this.videoProcessor.getVideoInfo(url);
+          const format = videoInfo.formats.find(f => f.format_id === formatId);
+          
+          if (!format) {
+            throw new Error('FORMAT_NOT_FOUND');
+          }
+
+          const segments = await this.sponsorBlock.getSegments(videoId);
+          
+          if (!segments || segments.length === 0) {
+            // Нет сегментов для удаления, скачиваем как есть
+            await this.telegramApi.sendMessage(chatId, 
+              'ℹ️ Рекламные блоки не найдены, скачиваю как есть'
+            );
+            await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
+          } else {
+            // Есть сегменты, скачиваем с удалением рекламы
+            await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, true, segments);
+          }
         }
       }
 

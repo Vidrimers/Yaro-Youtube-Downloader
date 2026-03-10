@@ -318,22 +318,38 @@ class TelegramHelper {
     const message = sponsorBlockInfo.description + '\n\n' +
                    '❓ Как скачать видео?';
 
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { 
-            text: '✂️ Убрать рекламу', 
-            callback_data: `sb_remove_${formatId}_${videoId}_${quality}` 
-          }
-        ],
-        [
-          { 
-            text: '📥 Скачать как есть', 
-            callback_data: `sb_keep_${formatId}_${videoId}_${quality}` 
-          }
-        ]
-      ]
-    };
+    // Получаем доступные категории из найденных сегментов
+    const availableCategories = [...new Set(sponsorBlockInfo.segments.map(s => s.category))];
+    const SponsorBlock = require('./sponsorblock');
+    const categoryGroups = SponsorBlock.getCategoryGroups();
+    
+    // Создаем кнопки для групп категорий, которые есть в видео
+    const keyboard = { inline_keyboard: [] };
+    
+    // Добавляем группы категорий, если они есть в видео
+    Object.entries(categoryGroups).forEach(([groupKey, group]) => {
+      const hasCategories = group.categories.some(cat => availableCategories.includes(cat));
+      if (hasCategories && groupKey !== 'all') { // 'all' добавим отдельно
+        keyboard.inline_keyboard.push([{
+          text: group.name,
+          callback_data: `sb_group_${groupKey}_${formatId}_${videoId}_${quality}`
+        }]);
+      }
+    });
+    
+    // Добавляем "Убрать все блоки" если есть хотя бы один сегмент
+    if (availableCategories.length > 0) {
+      keyboard.inline_keyboard.push([{
+        text: categoryGroups.all.name,
+        callback_data: `sb_group_all_${formatId}_${videoId}_${quality}`
+      }]);
+    }
+    
+    // Добавляем "Скачать как есть"
+    keyboard.inline_keyboard.push([{
+      text: '📥 Скачать как есть',
+      callback_data: `sb_keep_${formatId}_${videoId}_${quality}`
+    }]);
 
     await this.bot.sendMessage(chatId, message, {
       parse_mode: 'HTML',

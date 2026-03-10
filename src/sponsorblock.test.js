@@ -178,6 +178,39 @@ describe('SponsorBlock', () => {
         expect(result[1].segment).toEqual([353.862, 410.448]);
       });
     });
+
+    describe('Группы категорий', () => {
+      test('getCategoryGroups должен возвращать правильные группы', () => {
+        const groups = SponsorBlock.getCategoryGroups();
+        
+        expect(groups).toHaveProperty('ads');
+        expect(groups.ads.categories).toEqual(['sponsor', 'selfpromo']);
+        expect(groups).toHaveProperty('intro_outro');
+        expect(groups.intro_outro.categories).toEqual(['intro', 'outro']);
+        expect(groups).toHaveProperty('all');
+        expect(groups.all.categories).toContain('sponsor');
+      });
+
+      test('filterSegmentsByCategories должен фильтровать сегменты по категориям', () => {
+        const segments = [
+          { category: 'sponsor', segment: [10, 20] },
+          { category: 'intro', segment: [0, 5] },
+          { category: 'outro', segment: [100, 110] },
+          { category: 'interaction', segment: [50, 55] }
+        ];
+
+        const adsOnly = sponsorBlock.filterSegmentsByCategories(segments, ['sponsor', 'selfpromo']);
+        expect(adsOnly).toHaveLength(1);
+        expect(adsOnly[0].category).toBe('sponsor');
+
+        const introOutro = sponsorBlock.filterSegmentsByCategories(segments, ['intro', 'outro']);
+        expect(introOutro).toHaveLength(2);
+        expect(introOutro.map(s => s.category)).toEqual(['intro', 'outro']);
+
+        const empty = sponsorBlock.filterSegmentsByCategories(segments, []);
+        expect(empty).toHaveLength(0);
+      });
+    });
   });
 
   describe('formatTime', () => {
