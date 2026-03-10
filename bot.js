@@ -3,6 +3,7 @@ const path = require('path');
 const config = require('./config/config');
 const VideoProcessor = require('./src/ytdlp');
 const TelegramHelper = require('./src/telegram');
+const TelegramApiWrapper = require('./src/telegramWrapper');
 const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
 const SponsorBlock = require('./src/sponsorblock');
@@ -23,8 +24,16 @@ class BotController {
     
     // Инициализация компонентов
     this.bot = new TelegramBot(token, { polling: true });
+    
+    // Создаем wrapper для надежных API вызовов
+    this.telegramApi = new TelegramApiWrapper(this.bot, {
+      maxRetries: config.TELEGRAM_API_MAX_RETRIES || 3,
+      baseDelay: config.TELEGRAM_API_BASE_DELAY || 1000,
+      maxDelay: config.TELEGRAM_API_MAX_DELAY || 10000
+    });
+    
     this.videoProcessor = new VideoProcessor();
-    this.telegramHelper = new TelegramHelper(this.bot);
+    this.telegramHelper = new TelegramHelper(this.telegramApi.getMethodProxy());
     this.fileManager = new FileManager(config.TEMP_DIR, config.MERGE_TIMEOUT);
     this.sponsorBlock = new SponsorBlock(config.SPONSORBLOCK_API_URL);
     this.rateLimiter = new RateLimiter(
@@ -173,7 +182,7 @@ class BotController {
             allowedUsers: this.config.ALLOWED_USERS,
             attemptedUrl: text
           });
-          await this.bot.sendMessage(
+          await this.telegramApi.sendMessage(
             chatId, 
             '❌ Доступ запрещен. Этот бот доступен только авторизованным пользователям.'
           );
@@ -204,7 +213,7 @@ class BotController {
       Logger.info('Processing video', { userId, url: normalizedUrl });
       
       // Отправляем индикатор "печатает..."
-      await this.bot.sendChatAction(chatId, 'typing');
+      await this.telegramApi.sendChatAction(chatId, 'typing');
       
       // Получаем информацию о видео
       const videoInfo = await this.videoProcessor.getVideoInfo(normalizedUrl);
@@ -305,7 +314,7 @@ class BotController {
       
       if (!parsed) {
         Logger.error('Invalid callback data', new Error('Parse failed'), { callbackData });
-        await this.bot.answerCallbackQuery(query.id, { text: 'Ошибка обработки запроса' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Ошибка обработки запроса' });
         return;
       }
       
@@ -320,7 +329,7 @@ class BotController {
       if (!videoInfo || !videoInfo.formats) {
         Logger.error('Video info or formats not available in callback', null, { userId, videoId });
         await this.telegramHelper.sendError(chatId, 'video_unavailable');
-        await this.bot.answerCallbackQuery(query.id, { text: 'Видео недоступно' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Видео недоступно' });
         return;
       }
       
@@ -333,7 +342,7 @@ class BotController {
           availableFormats: videoInfo.formats.map(f => f.format_id).join(', ')
         });
         await this.telegramHelper.sendError(chatId, 'format_unavailable');
-        await this.bot.answerCallbackQuery(query.id, { text: 'Формат не найден' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Формат не найден' });
         return;
       }
       
@@ -368,7 +377,7 @@ class BotController {
         await this.telegramHelper.sendSponsorBlockChoice(
           chatId, videoId, formatId, quality, sponsorBlockInfo
         );
-        await this.bot.answerCallbackQuery(query.id, { text: 'Найдены рекламные блоки!' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Найдены рекламные блоки!' });
         return;
       }
 
@@ -380,14 +389,14 @@ class BotController {
       if (!isCombined) {
         // Формат раздельный - нужно скачать и объединить
         // ВАЖНО: отвечаем на callback query СРАЗУ, до начала скачивания
-        await this.bot.answerCallbackQuery(query.id, { text: 'Начинаю скачивание...' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Начинаю скачивание...' });
         await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
       } else {
         // Обычная прямая ссылка
-        await this.bot.sendChatAction(chatId, 'typing');
+        await this.telegramApi.sendChatAction(chatId, 'typing');
         const directUrl = await this.videoProcessor.getDirectUrl(url, formatId);
         await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, formatId, url);
-        await this.bot.answerCallbackQuery(query.id, { text: `Ссылка для ${quality} готова!` });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: `Ссылка для ${quality} готова!` });
       }
       
     } catch (error) {
@@ -429,7 +438,7 @@ class BotController {
       
       // Пытаемся ответить на callback query, но игнорируем ошибку если он уже устарел
       try {
-        await this.bot.answerCallbackQuery(query.id, { text: errorText });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: errorText });
       } catch (callbackError) {
         // Игнорируем ошибку - callback query мог устареть
         Logger.info('Failed to answer callback query (probably expired)', { userId });
@@ -595,8 +604,8 @@ class BotController {
         Logger.info('File size is within stable limit, sending to Telegram', { userId, fileSize });
         
         await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'uploading');
-        await this.bot.deleteMessage(chatId, statusMessage.message_id);
-        await this.bot.sendChatAction(chatId, 'upload_video');
+        await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+        await this.telegramApi.sendChatAction(chatId, 'upload_video');
         
         const uploadStartTime = Date.now();
         await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
@@ -615,8 +624,8 @@ class BotController {
         
         try {
           await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'uploading');
-          await this.bot.deleteMessage(chatId, statusMessage.message_id);
-          await this.bot.sendChatAction(chatId, 'upload_video');
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+          await this.telegramApi.sendChatAction(chatId, 'upload_video');
           
           const uploadStartTime = Date.now();
           await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
@@ -645,15 +654,15 @@ class BotController {
             
             // Обрабатываем специфические ошибки
             if (linkError.message === 'MAX_CONCURRENT_FILES_REACHED') {
-              await this.bot.sendMessage(chatId, 
+              await this.telegramApi.sendMessage(chatId, 
                 `❌ Сервер перегружен. Слишком много активных файлов. Попробуйте через несколько минут.`
               );
             } else if (linkError.message === 'INSUFFICIENT_DISK_SPACE') {
-              await this.bot.sendMessage(chatId, 
+              await this.telegramApi.sendMessage(chatId, 
                 `❌ Недостаточно места на сервере. Попробуйте позже или выберите качество пониже.`
               );
             } else {
-              await this.bot.sendMessage(chatId, 
+              await this.telegramApi.sendMessage(chatId, 
                 `❌ Не удалось создать ссылку для скачивания. Попробуйте позже.`
               );
             }
@@ -676,7 +685,7 @@ class BotController {
           
           if (isLocalUrl) {
             // Для локального URL отправляем текстом (Telegram не принимает localhost в кнопках)
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `📁 <b>Файл готов для скачивания!</b>\n\n` +
               `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
               `⏰ Ссылка действует до: ${expiresAt}\n\n` +
@@ -686,7 +695,7 @@ class BotController {
             );
           } else {
             // Для публичного URL используем кнопку
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `📁 <b>Файл готов для скачивания!</b>\n\n` +
               `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
               `⏰ Ссылка действует до: ${expiresAt}`,
@@ -727,22 +736,22 @@ class BotController {
           
           // Удаляем статусное сообщение
           try {
-            await this.bot.deleteMessage(chatId, statusMessage.message_id);
+            await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
           } catch (deleteError) {
             Logger.info('Could not delete status message', { userId });
           }
           
           // Обрабатываем специфические ошибки
           if (linkError.message === 'MAX_CONCURRENT_FILES_REACHED') {
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `❌ Сервер перегружен. Слишком много активных файлов. Попробуйте через несколько минут.`
             );
           } else if (linkError.message === 'INSUFFICIENT_DISK_SPACE') {
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `❌ Недостаточно места на сервере. Попробуйте позже или выберите качество пониже.`
             );
           } else {
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `❌ Не удалось создать ссылку для скачивания. Попробуйте позже.`
             );
           }
@@ -758,7 +767,7 @@ class BotController {
         
         // Удаляем статусное сообщение
         try {
-          await this.bot.deleteMessage(chatId, statusMessage.message_id);
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
         } catch (deleteError) {
           Logger.info('Could not delete status message', { userId });
         }
@@ -772,7 +781,7 @@ class BotController {
         
         if (isLocalUrl) {
           // Для локального URL отправляем текстом (Telegram не принимает localhost в кнопках)
-          await this.bot.sendMessage(chatId, 
+          await this.telegramApi.sendMessage(chatId, 
             `📁 <b>Файл готов для скачивания!</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}\n\n` +
@@ -783,7 +792,7 @@ class BotController {
           );
         } else {
           // Для публичного URL используем кнопку
-          await this.bot.sendMessage(chatId, 
+          await this.telegramApi.sendMessage(chatId, 
             `📁 <b>Файл готов для скачивания!</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}\n\n` +
@@ -815,7 +824,7 @@ class BotController {
       // Удаляем статусное сообщение если оно есть
       if (statusMessage) {
         try {
-          await this.bot.deleteMessage(chatId, statusMessage.message_id);
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
         } catch (deleteError) {
           Logger.info('Could not delete status message', { userId });
         }
@@ -864,7 +873,7 @@ class BotController {
             const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id);
             await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
             
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `ℹ️ Выбранный формат временно недоступен. Отправляю прямую ссылку для скачивания.`
             );
             
@@ -873,7 +882,7 @@ class BotController {
         } catch (fallbackError) {
           Logger.error('All fallback methods failed', fallbackError, { userId });
           
-          await this.bot.sendMessage(chatId, 
+          await this.telegramApi.sendMessage(chatId, 
             `❌ Произошла ошибка\n` +
             `Выбранный формат видео временно недоступен. Попробуйте другое качество или повторите попытку позже.`
           );
@@ -965,7 +974,7 @@ class BotController {
             `ℹ️ Не удалось загрузить видео в Telegram (размер: ${this.formatFileSize(fileSize)}). Отправляю прямую ссылку с видео и звуком для скачивания.` :
             `ℹ️ Не удалось загрузить видео в Telegram (размер: ${this.formatFileSize(fileSize)}). Отправляю прямую ссылку для скачивания.\n⚠️ Внимание: ссылка может содержать только видео без звука.`;
           
-          await this.bot.sendMessage(chatId, formatInfo);
+          await this.telegramApi.sendMessage(chatId, formatInfo);
           
           return; // Успешно обработали через fallback
         } catch (fallbackError) {
@@ -973,7 +982,7 @@ class BotController {
           
           // Если fallback не сработал, отправляем хотя бы сообщение об ошибке
           try {
-            await this.bot.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId, 
               `❌ Не удалось загрузить видео (размер: ${this.formatFileSize(await this.fileManager.getFileSize(outputPath))}). ` +
               `Файл слишком большой для Telegram.`
             );
@@ -1059,7 +1068,7 @@ class BotController {
 
       if (action === 'keep') {
         // Скачать как есть - используем обычную логику
-        await this.bot.answerCallbackQuery(query.id, { text: 'Скачиваю как есть...' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Скачиваю как есть...' });
         
         // Получаем информацию о видео
         const videoInfo = await this.videoProcessor.getVideoInfo(url);
@@ -1074,7 +1083,7 @@ class BotController {
 
       } else if (action === 'remove') {
         // Убрать рекламу
-        await this.bot.answerCallbackQuery(query.id, { text: 'Убираю рекламу и скачиваю...' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Убираю рекламу и скачиваю...' });
         
         // Получаем информацию о видео и сегменты
         const videoInfo = await this.videoProcessor.getVideoInfo(url);
@@ -1088,7 +1097,7 @@ class BotController {
         
         if (!segments || segments.length === 0) {
           // Нет сегментов для удаления, скачиваем как есть
-          await this.bot.sendMessage(chatId, 
+          await this.telegramApi.sendMessage(chatId, 
             'ℹ️ Рекламные блоки не найдены, скачиваю как есть'
           );
           await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
@@ -1106,7 +1115,7 @@ class BotController {
       await this.telegramHelper.sendError(chatId, 'unknown');
       
       try {
-        await this.bot.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
       } catch (callbackError) {
         Logger.info('Failed to answer callback query', { userId });
       }

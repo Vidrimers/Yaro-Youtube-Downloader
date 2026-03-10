@@ -50,6 +50,11 @@ class Config {
     // SponsorBlock интеграция
     this.SPONSORBLOCK_API_URL = 'https://sponsor.ajay.app'; // URL SponsorBlock API
     this.SPONSORBLOCK_ENABLED = true; // Включить SponsorBlock интеграцию
+    
+    // Telegram API Retry настройки
+    this.TELEGRAM_API_MAX_RETRIES = 3; // Максимум попыток retry для Telegram API
+    this.TELEGRAM_API_BASE_DELAY = 1000; // Базовая задержка между попытками (мс)
+    this.TELEGRAM_API_MAX_DELAY = 10000; // Максимальная задержка между попытками (мс)
   }
 
   /**
@@ -204,6 +209,28 @@ class Config {
     if (process.env.SPONSORBLOCK_ENABLED !== undefined) {
       this.SPONSORBLOCK_ENABLED = process.env.SPONSORBLOCK_ENABLED === 'true';
     }
+    
+    // Telegram API Retry настройки
+    if (process.env.TELEGRAM_API_MAX_RETRIES) {
+      const retries = parseInt(process.env.TELEGRAM_API_MAX_RETRIES, 10);
+      if (!isNaN(retries) && retries >= 0) {
+        this.TELEGRAM_API_MAX_RETRIES = retries;
+      }
+    }
+    
+    if (process.env.TELEGRAM_API_BASE_DELAY) {
+      const delay = parseInt(process.env.TELEGRAM_API_BASE_DELAY, 10);
+      if (!isNaN(delay) && delay > 0) {
+        this.TELEGRAM_API_BASE_DELAY = delay;
+      }
+    }
+    
+    if (process.env.TELEGRAM_API_MAX_DELAY) {
+      const delay = parseInt(process.env.TELEGRAM_API_MAX_DELAY, 10);
+      if (!isNaN(delay) && delay > 0) {
+        this.TELEGRAM_API_MAX_DELAY = delay;
+      }
+    }
   }
 
   /**
@@ -290,7 +317,10 @@ class Config {
       AUTO_DELETE_AFTER_DOWNLOAD: this.AUTO_DELETE_AFTER_DOWNLOAD,
       MIN_FREE_SPACE_GB: this.MIN_FREE_SPACE_GB,
       SPONSORBLOCK_API_URL: this.SPONSORBLOCK_API_URL,
-      SPONSORBLOCK_ENABLED: this.SPONSORBLOCK_ENABLED
+      SPONSORBLOCK_ENABLED: this.SPONSORBLOCK_ENABLED,
+      TELEGRAM_API_MAX_RETRIES: this.TELEGRAM_API_MAX_RETRIES,
+      TELEGRAM_API_BASE_DELAY: this.TELEGRAM_API_BASE_DELAY,
+      TELEGRAM_API_MAX_DELAY: this.TELEGRAM_API_MAX_DELAY
     };
   }
 }
