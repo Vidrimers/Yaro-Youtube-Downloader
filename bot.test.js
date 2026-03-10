@@ -30,7 +30,11 @@ describe('BotController', () => {
     mockVideoProcessor = {
       getVideoInfo: jest.fn(),
       getDirectUrl: jest.fn(),
-      filterAndSortFormats: jest.fn()
+      filterAndSortFormats: jest.fn(),
+      isCombinedFormat: jest.fn(),
+      getBestAudioFormat: jest.fn(),
+      downloadStream: jest.fn(),
+      downloadVideo: jest.fn()
     };
     
     VideoProcessor.mockImplementation(() => mockVideoProcessor);
@@ -280,8 +284,364 @@ describe('BotController', () => {
       });
     });
 
+    describe('Whitelist Filter', () => {
+      test('should allow user in whitelist', async () => {
+        // Создаем бота с whitelist
+        const testConfigWithWhitelist = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [100, 200, 300],
+          MAX_VIDEO_DURATION: null,
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithWhitelist = new BotController(
+          testConfigWithWhitelist.TELEGRAM_BOT_TOKEN, 
+          testConfigWithWhitelist
+        );
+        
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'dQw4w9WgXcQ',
+          title: 'Test Video',
+          duration: 180,
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: []
+        });
+        
+        mockVideoProcessor.filterAndSortFormats.mockReturnValue([]);
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 100, username: 'alloweduser' },
+          text: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        };
+        
+        await botWithWhitelist.handleMessage(msg);
+        
+        // Пользователь в whitelist, должен быть вызван getVideoInfo
+        expect(mockVideoProcessor.getVideoInfo).toHaveBeenCalled();
+      });
+      
+      test('should reject user not in whitelist', async () => {
+        // Создаем бота с whitelist
+        const testConfigWithWhitelist = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [100, 200, 300],
+          MAX_VIDEO_DURATION: null,
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithWhitelist = new BotController(
+          testConfigWithWhitelist.TELEGRAM_BOT_TOKEN, 
+          testConfigWithWhitelist
+        );
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 999, username: 'unauthorizeduser' },
+          text: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        };
+        
+        await botWithWhitelist.handleMessage(msg);
+        
+        // Пользователь НЕ в whitelist, должно быть отправлено сообщение об ошибке
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('Доступ запрещен')
+        );
+        
+        // getVideoInfo НЕ должен быть вызван
+        expect(mockVideoProcessor.getVideoInfo).not.toHaveBeenCalled();
+      });
+      
+      test('should allow all users when whitelist is empty', async () => {
+        // Бот без whitelist (пустой массив)
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'dQw4w9WgXcQ',
+          title: 'Test Video',
+          duration: 180,
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: []
+        });
+        
+        mockVideoProcessor.filterAndSortFormats.mockReturnValue([]);
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 999, username: 'anyuser' },
+          text: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        };
+        
+        await botController.handleMessage(msg);
+        
+        // Whitelist пустой, любой пользователь должен быть допущен
+        expect(mockVideoProcessor.getVideoInfo).toHaveBeenCalled();
+      });
+      
+      test('should log unauthorized access attempts', async () => {
+        const testConfigWithWhitelist = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [100, 200],
+          MAX_VIDEO_DURATION: null,
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithWhitelist = new BotController(
+          testConfigWithWhitelist.TELEGRAM_BOT_TOKEN, 
+          testConfigWithWhitelist
+        );
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 999, username: 'hacker' },
+          text: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        };
+        
+        // Логирование проверяется через вызов sendMessage с сообщением об ошибке
+        await botWithWhitelist.handleMessage(msg);
+        
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('Доступ запрещен')
+        );
+      });
+    });
+
+    describe('Duration Filter', () => {
+      test('should allow video within duration limit', async () => {
+        // Создаем бота с лимитом длительности 3600 секунд (1 час)
+        const testConfigWithDuration = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [],
+          MAX_VIDEO_DURATION: 3600,
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithDuration = new BotController(
+          testConfigWithDuration.TELEGRAM_BOT_TOKEN, 
+          testConfigWithDuration
+        );
+        
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'dQw4w9WgXcQ',
+          title: 'Short Video',
+          duration: 1800, // 30 минут
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: [
+            {
+              format_id: '137',
+              ext: 'mp4',
+              format_note: '1080p',
+              height: 1080,
+              filesize: 10000000,
+              vcodec: 'avc1',
+              acodec: 'mp4a'
+            }
+          ]
+        });
+        
+        mockVideoProcessor.filterAndSortFormats.mockReturnValue([
+          {
+            format_id: '137',
+            ext: 'mp4',
+            format_note: '1080p',
+            height: 1080,
+            filesize: 10000000,
+            vcodec: 'avc1',
+            acodec: 'mp4a'
+          }
+        ]);
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 7, username: 'testuser7' },
+          text: 'https://www.youtube.com/watch?v=short123'
+        };
+        
+        await botWithDuration.handleMessage(msg);
+        
+        // Видео в пределах лимита, должны быть отправлены форматы
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('Short Video'),
+          expect.any(Object)
+        );
+      });
+      
+      test('should reject video exceeding duration limit', async () => {
+        // Создаем бота с лимитом длительности 3600 секунд (1 час)
+        const testConfigWithDuration = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [],
+          MAX_VIDEO_DURATION: 3600,
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithDuration = new BotController(
+          testConfigWithDuration.TELEGRAM_BOT_TOKEN, 
+          testConfigWithDuration
+        );
+        
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'longvideo123',
+          title: 'Very Long Video',
+          duration: 7200, // 2 часа
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: []
+        });
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 8, username: 'testuser8' },
+          text: 'https://www.youtube.com/watch?v=longvideo123'
+        };
+        
+        await botWithDuration.handleMessage(msg);
+        
+        // Видео превышает лимит, должно быть отправлено сообщение об ошибке
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('Видео слишком длинное'),
+          expect.any(Object)
+        );
+        
+        // filterAndSortFormats НЕ должен быть вызван
+        expect(mockVideoProcessor.filterAndSortFormats).not.toHaveBeenCalled();
+      });
+      
+      test('should allow any duration when limit is not set', async () => {
+        // Бот без лимита длительности
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'verylongvideo',
+          title: 'Very Long Video',
+          duration: 10800, // 3 часа
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: [
+            {
+              format_id: '137',
+              ext: 'mp4',
+              format_note: '1080p',
+              height: 1080,
+              filesize: 10000000,
+              vcodec: 'avc1',
+              acodec: 'mp4a'
+            }
+          ]
+        });
+        
+        mockVideoProcessor.filterAndSortFormats.mockReturnValue([
+          {
+            format_id: '137',
+            ext: 'mp4',
+            format_note: '1080p',
+            height: 1080,
+            filesize: 10000000,
+            vcodec: 'avc1',
+            acodec: 'mp4a'
+          }
+        ]);
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 9, username: 'testuser9' },
+          text: 'https://www.youtube.com/watch?v=verylongvideo'
+        };
+        
+        await botController.handleMessage(msg);
+        
+        // Лимит не установлен, любая длительность допустима
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('Very Long Video'),
+          expect.any(Object)
+        );
+      });
+      
+      test('should format duration limit in error message correctly', async () => {
+        const testConfigWithDuration = {
+          TELEGRAM_BOT_TOKEN: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+          ALLOWED_USERS: [],
+          MAX_VIDEO_DURATION: 1800, // 30 минут
+          NODE_ENV: 'test',
+          RATE_LIMIT_MAX_REQUESTS: 5,
+          RATE_LIMIT_WINDOW_MS: 60000,
+          YTDLP_METADATA_TIMEOUT: 30000,
+          YTDLP_URL_TIMEOUT: 15000
+        };
+        
+        const botWithDuration = new BotController(
+          testConfigWithDuration.TELEGRAM_BOT_TOKEN, 
+          testConfigWithDuration
+        );
+        
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'longvideo',
+          title: 'Long Video',
+          duration: 2400, // 40 минут
+          thumbnail: 'https://example.com/thumb.jpg',
+          uploader: 'Test Channel',
+          formats: []
+        });
+        
+        const msg = {
+          chat: { id: 12345 },
+          from: { id: 10, username: 'testuser10' },
+          text: 'https://www.youtube.com/watch?v=longvideo'
+        };
+        
+        await botWithDuration.handleMessage(msg);
+        
+        // Проверяем, что в сообщении указано правильное количество минут (30)
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+          12345,
+          expect.stringContaining('30'),
+          expect.any(Object)
+        );
+      });
+    });
+
     describe('handleCallbackQuery', () => {
       test('should handle valid callback query', async () => {
+        // Настраиваем моки для комбинированного формата
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'dQw4w9WgXcQ',
+          title: 'Test Video',
+          formats: [
+            {
+              format_id: '137',
+              ext: 'mp4',
+              vcodec: 'avc1',
+              acodec: 'mp4a', // комбинированный формат
+              height: 1080
+            }
+          ]
+        });
+        
+        mockVideoProcessor.isCombinedFormat.mockReturnValue(true);
         mockVideoProcessor.getDirectUrl.mockResolvedValue('https://example.com/video.mp4');
         
         const query = {
@@ -329,7 +689,12 @@ describe('BotController', () => {
       });
       
       test('should handle format unavailable error', async () => {
-        mockVideoProcessor.getDirectUrl.mockRejectedValue(new Error('FORMAT_UNAVAILABLE'));
+        // Настраиваем мок для получения videoInfo, но без нужного формата
+        mockVideoProcessor.getVideoInfo.mockResolvedValue({
+          id: 'dQw4w9WgXcQ',
+          title: 'Test Video',
+          formats: [] // Пустой массив форматов
+        });
         
         const query = {
           id: 'query123',
@@ -384,6 +749,7 @@ describe('BotController', () => {
       ]);
       
       mockVideoProcessor.getDirectUrl.mockResolvedValue('https://example.com/video.mp4');
+      mockVideoProcessor.isCombinedFormat.mockReturnValue(true); // Комбинированный формат
       
       // Шаг 1: Отправка URL
       const msg = {

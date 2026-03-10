@@ -170,6 +170,143 @@ class VideoProcessor {
   }
 
   /**
+   * Скачивает видео и возвращает путь к файлу
+   * @param {string} url - YouTube URL
+   * @param {string} formatId - ID формата
+   * @param {string} outputPath - путь для сохранения файла
+   * @param {number} timeout - timeout в миллисекундах
+   * @returns {Promise<string>} - путь к скачанному файлу
+   * @throws {Error} - если не удалось скачать
+   */
+  async downloadVideo(url, formatId, outputPath, timeout = 300000) {
+    // Для комбинированных форматов yt-dlp автоматически объединит видео и аудио
+    const args = [
+      '-f', formatId,
+      '--merge-output-format', 'mp4', // Объединяем в mp4
+      '-o', outputPath,
+      '--no-warnings',
+      url
+    ];
+    
+    try {
+      await this.executeYtDlp(args, timeout);
+      return outputPath;
+    } catch (error) {
+      if (error.message === 'TIMEOUT') {
+        throw new Error('TIMEOUT');
+      }
+      
+      if (error.stderr && error.stderr.includes('requested format not available')) {
+        throw new Error('FORMAT_UNAVAILABLE');
+      }
+      
+      if (error.stderr && (error.stderr.includes('network') || error.stderr.includes('Connection'))) {
+        throw new Error('NETWORK_ERROR');
+      }
+      
+      throw new Error('UNKNOWN_ERROR');
+    }
+  }
+
+  /**
+   * Скачивает отдельный поток (видео или аудио)
+   * @param {string} url - YouTube URL
+   * @param {string} formatId - ID формата
+   * @param {string} outputPath - путь для сохранения файла
+   * @param {number} timeout - timeout в миллисекундах
+   * @returns {Promise<string>} - путь к скачанному файлу
+   */
+  async downloadStream(url, formatId, outputPath, timeout = 300000) {
+    const args = [
+      '-f', formatId,
+      '-o', outputPath,
+      '--no-warnings',
+      url
+    ];
+    
+    try {
+      await this.executeYtDlp(args, timeout);
+      return outputPath;
+    } catch (error) {
+      // Логируем детали ошибки для отладки
+      const { Logger } = require('./utils');
+      Logger.error('Download stream failed', error, { 
+        formatId, 
+        outputPath,
+        stderr: error.stderr || 'no stderr',
+        message: error.message 
+      });
+      
+      if (error.message === 'TIMEOUT') {
+        throw new Error('TIMEOUT');
+      }
+      
+      if (error.stderr) {
+        if (error.stderr.includes('requested format not available') || 
+            error.stderr.includes('Requested format is not available')) {
+          throw new Error('FORMAT_UNAVAILABLE');
+        }
+        
+        if (error.stderr.includes('network') || error.stderr.includes('Connection')) {
+          throw new Error('NETWORK_ERROR');
+        }
+      }
+      
+      // Передаем оригинальную ошибку с деталями
+      const detailedError = new Error('DOWNLOAD_FAILED');
+      detailedError.originalError = error;
+      detailedError.stderr = error.stderr;
+      throw detailedError;
+    }
+  }
+
+  /**
+   * Получает лучший аудио формат для видео
+   * @param {Array} formats - массив всех форматов
+   * @returns {Object|null} - лучший аудио формат или null
+   */
+  getBestAudioFormat(formats) {
+    const audioFormats = formats.filter(f => 
+      f.acodec && f.acodec !== 'none' && 
+      (!f.vcodec || f.vcodec === 'none')
+    );
+    
+    if (audioFormats.length === 0) {
+      return null;
+    }
+    
+    // Приоритет форматов аудио (от лучшего к худшему)
+    const PREFERRED_AUDIO_FORMATS = ['251', '140', '139', '250', '249'];
+    
+    // Сначала пытаемся найти предпочтительные форматы
+    for (const preferredId of PREFERRED_AUDIO_FORMATS) {
+      const format = audioFormats.find(f => f.format_id === preferredId);
+      if (format) {
+        return format;
+      }
+    }
+    
+    // Если предпочтительные не найдены, сортируем по битрейту
+    audioFormats.sort((a, b) => {
+      const bitrateA = a.abr || 0;
+      const bitrateB = b.abr || 0;
+      return bitrateB - bitrateA;
+    });
+    
+    return audioFormats[0];
+  }
+
+  /**
+   * Проверяет, является ли формат комбинированным (видео+аудио)
+   * @param {Object} format - объект формата
+   * @returns {boolean}
+   */
+  isCombinedFormat(format) {
+    return format.vcodec && format.vcodec !== 'none' && 
+           format.acodec && format.acodec !== 'none';
+  }
+
+  /**
    * Фильтрует и сортирует форматы видео
    * @private
    * @param {Array} formats - массив форматов от yt-dlp
@@ -179,66 +316,95 @@ class VideoProcessor {
     // Популярные разрешения
     const POPULAR_RESOLUTIONS = ['1080p', '720p', '480p', '360p', '240p'];
     
-    // Шаг 1: Базовая фильтрация - только форматы с видео и аудио
-    const withVideoAndAudio = formats.filter(f => 
+    // Шаг 1: Разделяем форматы на комбинированные и только видео
+    const combinedFormats = formats.filter(f => 
       f.vcodec && f.vcodec !== 'none' && 
       f.acodec && f.acodec !== 'none'
     );
     
-    // Шаг 2: Фильтрация по популярным разрешениям
-    const popularFormats = withVideoAndAudio.filter(f => {
-      // Проверяем format_note (например, "1080p", "720p")
+    const videoOnlyFormats = formats.filter(f =>
+      f.vcodec && f.vcodec !== 'none' &&
+      (!f.acodec || f.acodec === 'none')
+    );
+    
+    // Шаг 2: Фильтрация комбинированных форматов по популярным разрешениям
+    const popularCombined = combinedFormats.filter(f => {
       if (f.format_note && POPULAR_RESOLUTIONS.includes(f.format_note)) {
         return true;
       }
-      
-      // Если format_note нет, проверяем по высоте
       if (f.height) {
         const resolution = `${f.height}p`;
         return POPULAR_RESOLUTIONS.includes(resolution);
       }
-      
       return false;
     });
     
-    // Шаг 3: Группировка по разрешению и выбор формата с меньшим размером
-    const groupedByResolution = {};
-    
-    popularFormats.forEach(format => {
-      const resolution = format.format_note || `${format.height}p`;
-      
-      if (!groupedByResolution[resolution]) {
-        groupedByResolution[resolution] = [];
+    // Шаг 3: Фильтрация видео-only форматов по популярным разрешениям
+    const popularVideoOnly = videoOnlyFormats.filter(f => {
+      if (f.format_note && POPULAR_RESOLUTIONS.includes(f.format_note)) {
+        return true;
       }
-      
-      groupedByResolution[resolution].push(format);
+      if (f.height) {
+        const resolution = `${f.height}p`;
+        return POPULAR_RESOLUTIONS.includes(resolution);
+      }
+      return false;
     });
     
-    // Для каждого разрешения выбираем формат с меньшим размером
+    // Шаг 4: Группировка всех форматов по разрешению
+    const groupedByResolution = {};
+    
+    // Добавляем комбинированные форматы
+    popularCombined.forEach(format => {
+      const resolution = format.format_note || `${format.height}p`;
+      if (!groupedByResolution[resolution]) {
+        groupedByResolution[resolution] = { combined: [], videoOnly: [] };
+      }
+      groupedByResolution[resolution].combined.push(format);
+    });
+    
+    // Добавляем видео-only форматы
+    popularVideoOnly.forEach(format => {
+      const resolution = format.format_note || `${format.height}p`;
+      if (!groupedByResolution[resolution]) {
+        groupedByResolution[resolution] = { combined: [], videoOnly: [] };
+      }
+      groupedByResolution[resolution].videoOnly.push(format);
+    });
+    
+    // Шаг 5: Для каждого разрешения выбираем лучший формат
     const bestFormats = [];
     
     for (const resolution in groupedByResolution) {
-      const formatsForResolution = groupedByResolution[resolution];
+      const { combined, videoOnly } = groupedByResolution[resolution];
       
-      // Выбираем формат с меньшим размером (или первый, если размер неизвестен)
-      const bestFormat = formatsForResolution.reduce((best, current) => {
-        // Если у обоих нет размера, берем первый
-        if (!best.filesize && !current.filesize) {
-          return best;
-        }
-        
-        // Если у одного нет размера, берем тот, у которого есть
-        if (!best.filesize) return current;
-        if (!current.filesize) return best;
-        
-        // Берем с меньшим размером
-        return current.filesize < best.filesize ? current : best;
-      });
-      
-      bestFormats.push(bestFormat);
+      // Если есть комбинированные форматы, выбираем лучший из них
+      if (combined.length > 0) {
+        const bestCombined = combined.reduce((best, current) => {
+          if (!best.filesize && !current.filesize) return best;
+          if (!best.filesize) return current;
+          if (!current.filesize) return best;
+          return current.filesize < best.filesize ? current : best;
+        });
+        bestCombined.isCombined = true;
+        bestCombined.needsMerge = false;
+        bestFormats.push(bestCombined);
+      }
+      // Если есть только видео-only форматы, выбираем лучший
+      else if (videoOnly.length > 0) {
+        const bestVideoOnly = videoOnly.reduce((best, current) => {
+          if (!best.filesize && !current.filesize) return best;
+          if (!best.filesize) return current;
+          if (!current.filesize) return best;
+          return current.filesize < best.filesize ? current : best;
+        });
+        bestVideoOnly.isCombined = false;
+        bestVideoOnly.needsMerge = true;
+        bestFormats.push(bestVideoOnly);
+      }
     }
     
-    // Шаг 4: Сортировка от высокого качества к низкому
+    // Шаг 6: Сортировка от высокого качества к низкому
     bestFormats.sort((a, b) => {
       const heightA = a.height || 0;
       const heightB = b.height || 0;

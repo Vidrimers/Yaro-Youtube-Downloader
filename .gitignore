@@ -3,6 +3,7 @@
 node_modules/
 dist/
 temp/
+mytemp/
 .vscode/
 .DS_Store
 npm/
@@ -42,7 +43,9 @@ server/scripts/migrate-*.js
 scripts/migrate-*.js
 cloudflared-tunnel*
 Порядок
-
+README copy.md
+падение*
+test_output*
 
 
 

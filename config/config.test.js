@@ -26,6 +26,11 @@ describe('Config Module', () => {
     Config.RATE_LIMIT_WINDOW_MS = 60000;
     Config.YTDLP_METADATA_TIMEOUT = 30000;
     Config.YTDLP_URL_TIMEOUT = 15000;
+    Config.FILE_SERVER_PORT = 3001;
+    Config.FILE_SERVER_BASE_URL = null;
+    Config.LARGE_FILE_TTL_MINUTES = 10;
+    Config.TELEGRAM_UPLOAD_LIMIT = 524288000;
+    Config.TELEGRAM_UPLOAD_TIMEOUT = 600000;
   });
 
   afterEach(() => {
@@ -125,6 +130,11 @@ describe('Config Module', () => {
       expect(Config.RATE_LIMIT_WINDOW_MS).toBe(60000); // значение по умолчанию
       expect(Config.YTDLP_METADATA_TIMEOUT).toBe(30000); // значение по умолчанию
       expect(Config.YTDLP_URL_TIMEOUT).toBe(15000); // значение по умолчанию
+      expect(Config.FILE_SERVER_PORT).toBe(3001); // значение по умолчанию
+      expect(Config.FILE_SERVER_BASE_URL).toBeNull(); // null по умолчанию
+      expect(Config.LARGE_FILE_TTL_MINUTES).toBe(10); // значение по умолчанию
+      expect(Config.TELEGRAM_UPLOAD_LIMIT).toBe(524288000); // 500MB по умолчанию
+      expect(Config.TELEGRAM_UPLOAD_TIMEOUT).toBe(600000); // 10 минут по умолчанию
     });
 
     test('должен корректно парсить ALLOWED_USERS с пробелами', () => {
@@ -220,6 +230,7 @@ describe('Config Module', () => {
       Config.NODE_ENV = 'development';
       Config.ALLOWED_USERS = [111, 222];
       Config.MAX_VIDEO_DURATION = 3600;
+      Config.YTDLP_URL_TIMEOUT = 45000; // Устанавливаем новое значение
 
       // Act
       const config = Config.getAll();
@@ -233,7 +244,18 @@ describe('Config Module', () => {
         RATE_LIMIT_MAX_REQUESTS: 5,
         RATE_LIMIT_WINDOW_MS: 60000,
         YTDLP_METADATA_TIMEOUT: 30000,
-        YTDLP_URL_TIMEOUT: 15000
+        YTDLP_URL_TIMEOUT: 45000, // Обновлено значение
+        TEMP_DIR: './temp',
+        MAX_FILE_SIZE: 2147483648,
+        DOWNLOAD_TIMEOUT: 600000,
+        MERGE_TIMEOUT: 300000,
+        CLEANUP_INTERVAL: 3600000,
+        FILE_MAX_AGE: 7200000,
+        FILE_SERVER_PORT: 3001,
+        FILE_SERVER_BASE_URL: null,
+        LARGE_FILE_TTL_MINUTES: 10,
+        TELEGRAM_UPLOAD_LIMIT: 524288000, // 500MB
+        TELEGRAM_UPLOAD_TIMEOUT: 600000 // 10 минут
       });
     });
   });

@@ -25,7 +25,22 @@ class Config {
     
     // yt-dlp Timeouts (в миллисекундах)
     this.YTDLP_METADATA_TIMEOUT = 30000; // 30 секунд
-    this.YTDLP_URL_TIMEOUT = 15000; // 15 секунд
+    this.YTDLP_URL_TIMEOUT = 45000; // 45 секунд (увеличено с 15 для стабильности)
+    
+    // File Management
+    this.TEMP_DIR = './temp'; // Директория для временных файлов
+    this.MAX_FILE_SIZE = 2147483648; // 2GB - максимальный размер видео для Telegram (для обычных файлов 50MB)
+    this.DOWNLOAD_TIMEOUT = 600000; // 10 минут на скачивание
+    this.MERGE_TIMEOUT = 300000; // 5 минут на объединение
+    this.CLEANUP_INTERVAL = 3600000; // 1 час - интервал очистки старых файлов
+    this.FILE_MAX_AGE = 7200000; // 2 часа - максимальный возраст файла
+    
+    // File Server для больших файлов
+    this.FILE_SERVER_PORT = 3001; // Порт для HTTP сервера файлов
+    this.FILE_SERVER_BASE_URL = null; // Базовый URL (если null, то http://localhost:PORT)
+    this.LARGE_FILE_TTL_MINUTES = 10; // Время жизни больших файлов в минутах
+    this.TELEGRAM_UPLOAD_LIMIT = 524288000; // 500MB - лимит для попытки загрузки в Telegram
+    this.TELEGRAM_UPLOAD_TIMEOUT = 600000; // 10 минут - timeout для загрузки в Telegram
   }
 
   /**
@@ -91,6 +106,65 @@ class Config {
       const timeout = parseInt(process.env.YTDLP_URL_TIMEOUT, 10);
       if (!isNaN(timeout) && timeout > 0) {
         this.YTDLP_URL_TIMEOUT = timeout;
+      }
+    }
+    
+    // File Management параметры
+    if (process.env.TEMP_DIR) {
+      this.TEMP_DIR = process.env.TEMP_DIR;
+    }
+    
+    if (process.env.MAX_FILE_SIZE) {
+      const size = parseInt(process.env.MAX_FILE_SIZE, 10);
+      if (!isNaN(size) && size > 0) {
+        this.MAX_FILE_SIZE = size;
+      }
+    }
+    
+    if (process.env.DOWNLOAD_TIMEOUT) {
+      const timeout = parseInt(process.env.DOWNLOAD_TIMEOUT, 10);
+      if (!isNaN(timeout) && timeout > 0) {
+        this.DOWNLOAD_TIMEOUT = timeout;
+      }
+    }
+    
+    if (process.env.MERGE_TIMEOUT) {
+      const timeout = parseInt(process.env.MERGE_TIMEOUT, 10);
+      if (!isNaN(timeout) && timeout > 0) {
+        this.MERGE_TIMEOUT = timeout;
+      }
+    }
+    
+    // File Server параметры
+    if (process.env.FILE_SERVER_PORT) {
+      const port = parseInt(process.env.FILE_SERVER_PORT, 10);
+      if (!isNaN(port) && port > 0) {
+        this.FILE_SERVER_PORT = port;
+      }
+    }
+    
+    if (process.env.FILE_SERVER_BASE_URL) {
+      this.FILE_SERVER_BASE_URL = process.env.FILE_SERVER_BASE_URL;
+    }
+    
+    if (process.env.LARGE_FILE_TTL_MINUTES) {
+      const ttl = parseInt(process.env.LARGE_FILE_TTL_MINUTES, 10);
+      if (!isNaN(ttl) && ttl > 0) {
+        this.LARGE_FILE_TTL_MINUTES = ttl;
+      }
+    }
+    
+    if (process.env.TELEGRAM_UPLOAD_LIMIT) {
+      const limit = parseInt(process.env.TELEGRAM_UPLOAD_LIMIT, 10);
+      if (!isNaN(limit) && limit > 0) {
+        this.TELEGRAM_UPLOAD_LIMIT = limit;
+      }
+    }
+    
+    if (process.env.TELEGRAM_UPLOAD_TIMEOUT) {
+      const timeout = parseInt(process.env.TELEGRAM_UPLOAD_TIMEOUT, 10);
+      if (!isNaN(timeout) && timeout > 0) {
+        this.TELEGRAM_UPLOAD_TIMEOUT = timeout;
       }
     }
   }
@@ -163,7 +237,18 @@ class Config {
       RATE_LIMIT_MAX_REQUESTS: this.RATE_LIMIT_MAX_REQUESTS,
       RATE_LIMIT_WINDOW_MS: this.RATE_LIMIT_WINDOW_MS,
       YTDLP_METADATA_TIMEOUT: this.YTDLP_METADATA_TIMEOUT,
-      YTDLP_URL_TIMEOUT: this.YTDLP_URL_TIMEOUT
+      YTDLP_URL_TIMEOUT: this.YTDLP_URL_TIMEOUT,
+      TEMP_DIR: this.TEMP_DIR,
+      MAX_FILE_SIZE: this.MAX_FILE_SIZE,
+      DOWNLOAD_TIMEOUT: this.DOWNLOAD_TIMEOUT,
+      MERGE_TIMEOUT: this.MERGE_TIMEOUT,
+      CLEANUP_INTERVAL: this.CLEANUP_INTERVAL,
+      FILE_MAX_AGE: this.FILE_MAX_AGE,
+      FILE_SERVER_PORT: this.FILE_SERVER_PORT,
+      FILE_SERVER_BASE_URL: this.FILE_SERVER_BASE_URL,
+      LARGE_FILE_TTL_MINUTES: this.LARGE_FILE_TTL_MINUTES,
+      TELEGRAM_UPLOAD_LIMIT: this.TELEGRAM_UPLOAD_LIMIT,
+      TELEGRAM_UPLOAD_TIMEOUT: this.TELEGRAM_UPLOAD_TIMEOUT
     };
   }
 }

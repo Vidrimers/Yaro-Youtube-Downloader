@@ -379,7 +379,7 @@ describe('TelegramHelper Unit Tests', () => {
       expect(message.text).toContain('1080p');
       expect(message.text).toContain('/start');
       expect(message.text).toContain('/help');
-      expect(message.options.parse_mode).toBe('Markdown');
+      expect(message.options.parse_mode).toBe('HTML');
     });
   });
 

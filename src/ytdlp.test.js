@@ -50,10 +50,10 @@ describe('VideoProcessor Property Tests', () => {
         (formats) => {
           const filtered = processor.filterAndSortFormats(formats);
 
-          // Проверка 1: Все отфильтрованные форматы имеют vcodec != 'none' AND acodec != 'none'
-          const allHaveVideoAndAudio = filtered.every(f => 
-            f.vcodec && f.vcodec !== 'none' && 
-            f.acodec && f.acodec !== 'none'
+          // Проверка 1: Все отфильтрованные форматы имеют vcodec != 'none' 
+          // (могут быть как комбинированные, так и видео-only форматы)
+          const allHaveVideo = filtered.every(f => 
+            f.vcodec && f.vcodec !== 'none'
           );
 
           // Проверка 2: Все форматы отсортированы по убыванию высоты
@@ -67,7 +67,7 @@ describe('VideoProcessor Property Tests', () => {
             }
           }
 
-          return allHaveVideoAndAudio && isSorted;
+          return allHaveVideo && isSorted;
         }
       ),
       { numRuns: 100 }
@@ -220,7 +220,7 @@ describe('VideoProcessor Unit Tests', () => {
           format_id: '137',
           ext: 'mp4',
           vcodec: 'avc1',
-          acodec: 'none', // только видео
+          acodec: 'none', // только видео - должен быть включен
           height: 1080,
           format_note: '1080p',
           filesize: 50000000
@@ -228,7 +228,7 @@ describe('VideoProcessor Unit Tests', () => {
         {
           format_id: '140',
           ext: 'mp4',
-          vcodec: 'none', // только аудио
+          vcodec: 'none', // только аудио - должен быть исключен
           acodec: 'mp4a',
           height: null,
           format_note: null,
@@ -238,7 +238,7 @@ describe('VideoProcessor Unit Tests', () => {
           format_id: '22',
           ext: 'mp4',
           vcodec: 'avc1',
-          acodec: 'mp4a', // видео + аудио
+          acodec: 'mp4a', // видео + аудио - должен быть включен
           height: 720,
           format_note: '720p',
           filesize: 30000000
@@ -247,8 +247,12 @@ describe('VideoProcessor Unit Tests', () => {
 
       const filtered = processor.filterAndSortFormats(mockFormats);
 
-      expect(filtered).toHaveLength(1);
-      expect(filtered[0].format_id).toBe('22');
+      // Должны быть включены форматы 137 (видео-only) и 22 (комбинированный)
+      // Формат 140 (только аудио) должен быть исключен
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(f => f.format_id)).toContain('137');
+      expect(filtered.map(f => f.format_id)).toContain('22');
+      expect(filtered.map(f => f.format_id)).not.toContain('140');
     });
   });
 

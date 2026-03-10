@@ -300,6 +300,16 @@ class Logger {
   }
 
   /**
+   * Логирует предупреждение
+   * @param {string} message - сообщение предупреждения
+   * @param {object} metadata - дополнительные данные
+   */
+  static warn(message, metadata = {}) {
+    const formatted = this.format('WARN', message);
+    console.warn(formatted, metadata && Object.keys(metadata).length > 0 ? metadata : '');
+  }
+
+  /**
    * Логирует ошибку
    * @param {string} message - сообщение об ошибке
    * @param {Error} error - объект ошибки

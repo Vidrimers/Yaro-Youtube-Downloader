@@ -23,8 +23,11 @@ class TelegramHelper {
       const fileSize = Formatter.formatFileSize(format.filesize || 0);
       const ext = format.ext || 'mp4';
       
-      // Формат кнопки: 🎬 1080p MP4 (150 MB)
-      const buttonText = `🎬 ${resolution} ${ext.toUpperCase()} (${fileSize})`;
+      // Добавляем индикатор если формат требует объединения
+      const mergeIcon = format.needsMerge ? '🔄 ' : '';
+      
+      // Формат кнопки: 🎬 1080p MP4 (150 MB) или 🔄 🎬 1080p MP4 (150 MB)
+      const buttonText = `${mergeIcon}🎬 ${resolution} ${ext.toUpperCase()} (${fileSize})`;
       const callbackData = Formatter.createCallbackData(format.format_id, videoId, resolution);
       
       return [{
@@ -66,9 +69,11 @@ class TelegramHelper {
    * @param {number} chatId - ID чата
    * @param {string} url - прямая ссылка
    * @param {string} quality - выбранное качество
+   * @param {string} formatId - ID формата
+   * @param {string} videoUrl - оригинальная ссылка на видео
    * @returns {Promise<void>}
    */
-  async sendDirectLink(chatId, url, quality) {
+  async sendDirectLink(chatId, url, quality, formatId, videoUrl) {
     const message = `✅ *Ссылка готова!*\n\n` +
                    `Качество: ${quality}\n\n` +
                    `🔗 [Нажмите для скачивания](${url})\n\n` +
@@ -78,6 +83,114 @@ class TelegramHelper {
       parse_mode: 'Markdown',
       disable_web_page_preview: true
     });
+  }
+
+  /**
+   * Отправляет видео файл в Telegram
+   * @param {number} chatId - ID чата
+   * @param {string} filePath - путь к видео файлу
+   * @param {Object} videoInfo - информация о видео
+   * @param {string} quality - качество видео
+   * @param {number} uploadTimeout - timeout для загрузки (по умолчанию 10 минут)
+   * @param {number} maxRetries - максимальное количество попыток (по умолчанию 2)
+   * @returns {Promise<void>}
+   */
+  async sendVideoFile(chatId, filePath, videoInfo, quality, uploadTimeout = 600000, maxRetries = 2) {
+    const caption = `📹 ${videoInfo.title}\n\n` +
+                   `Качество: ${quality}\n` +
+                   `⏱ Длительность: ${Formatter.formatDuration(videoInfo.duration || 0)}`;
+
+    let lastError = null;
+    
+    // Пробуем загрузить файл с retry логикой
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.bot.sendVideo(chatId, filePath, {
+          caption: caption,
+          supports_streaming: true,
+          parse_mode: 'Markdown',
+          timeout: uploadTimeout,
+          disable_notification: false
+        });
+        
+        // Успешно загружено
+        return;
+        
+      } catch (error) {
+        lastError = error;
+        
+        // Если ошибка 413 (файл слишком большой), не пытаемся повторно
+        if (error.message && error.message.includes('413')) {
+          throw error;
+        }
+        
+        // Если это последняя попытка, пробрасываем ошибку
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        
+        // Логируем попытку и ждем перед следующей
+        Logger.warn(`Upload attempt ${attempt} failed, retrying...`, { 
+          chatId, 
+          attempt, 
+          error: error.message 
+        });
+        
+        // Ждем перед следующей попыткой (экспоненциальная задержка)
+        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+      }
+    }
+    
+    // Если дошли сюда, значит все попытки провалились
+    throw lastError;
+  }
+
+  /**
+   * Отправляет сообщение о процессе скачивания
+   * @param {number} chatId - ID чата
+   * @param {string} status - статус процесса
+   * @returns {Promise<Object>} - отправленное сообщение
+   */
+  async sendDownloadStatus(chatId, status) {
+    const statusMessages = {
+      downloading: '⏬ Скачиваю видео...',
+      downloading_audio: '🎵 Скачиваю аудио...',
+      merging: '🔄 Объединяю видео и аудио...',
+      uploading: '⏫ Загружаю в Telegram...',
+      processing: '⚙️ Обрабатываю...'
+    };
+
+    const message = statusMessages[status] || statusMessages.processing;
+    
+    return await this.bot.sendMessage(chatId, message);
+  }
+
+  /**
+   * Обновляет сообщение о статусе
+   * @param {number} chatId - ID чата
+   * @param {number} messageId - ID сообщения
+   * @param {string} status - новый статус
+   * @returns {Promise<void>}
+   */
+  async updateDownloadStatus(chatId, messageId, status) {
+    const statusMessages = {
+      downloading: '⏬ Скачиваю видео...',
+      downloading_audio: '🎵 Скачиваю аудио...',
+      merging: '🔄 Объединяю видео и аудио...',
+      uploading: '⏫ Загружаю в Telegram...',
+      processing: '⚙️ Обрабатываю...'
+    };
+
+    const message = statusMessages[status] || statusMessages.processing;
+    
+    try {
+      await this.bot.editMessageText(message, {
+        chat_id: chatId,
+        message_id: messageId
+      });
+    } catch (error) {
+      // Игнорируем ошибки редактирования (например, если сообщение не изменилось)
+    }
   }
 
   /**
@@ -104,6 +217,12 @@ class TelegramHelper {
       network_error: '🌐 *Ошибка сети*\n\nПроблемы с подключением. Попробуйте позже.',
       
       format_unavailable: '❌ *Формат недоступен*\n\nВыбранный формат больше не доступен. Попробуйте другой.',
+      
+      file_too_large: '❌ *Файл слишком большой*\n\nРазмер файла превышает лимит Telegram (2GB).\nПопробуйте выбрать качество пониже.',
+      
+      merge_failed: '❌ *Ошибка объединения*\n\nНе удалось объединить видео и аудио.\nПопробуйте другой формат.',
+      
+      download_failed: '❌ *Ошибка скачивания*\n\nНе удалось скачать видео.\nПопробуйте позже.',
       
       rate_limit_exceeded: `⏳ *Слишком много запросов*\n\nПопробуйте через ${details} секунд.`,
       
@@ -144,27 +263,27 @@ class TelegramHelper {
    * @returns {Promise<void>}
    */
   async sendHelp(chatId) {
-    const message = `📖 *Справка*\n\n` +
-                   `*Поддерживаемые форматы ссылок:*\n` +
+    const message = `📖 <b>Справка</b>\n\n` +
+                   `<b>Поддерживаемые форматы ссылок:</b>\n` +
                    `• https://www.youtube.com/watch?v=VIDEO_ID\n` +
                    `• https://youtu.be/VIDEO_ID\n` +
                    `• https://m.youtube.com/watch?v=VIDEO_ID\n\n` +
-                   `*Доступные качества:*\n` +
+                   `<b>Доступные качества:</b>\n` +
                    `• 1080p (Full HD)\n` +
                    `• 720p (HD)\n` +
                    `• 480p (SD)\n` +
                    `• 360p\n` +
                    `• 240p\n\n` +
-                   `*Команды:*\n` +
+                   `<b>Команды:</b>\n` +
                    `/start - Начать работу с ботом\n` +
                    `/help - Показать эту справку\n\n` +
-                   `*Ограничения:*\n` +
+                   `<b>Ограничения:</b>\n` +
                    `• Максимум 5 запросов в минуту\n` +
                    `• Ссылки действительны ограниченное время\n\n` +
-                   `⚠️ *Важно:* Бот не скачивает и не хранит видео, а только предоставляет прямые ссылки.`;
+                   `⚠️ <b>Важно:</b> Бот не скачивает и не хранит видео, а только предоставляет прямые ссылки.`;
 
     await this.bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown'
+      parse_mode: 'HTML'
     });
   }
 
