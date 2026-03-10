@@ -8,13 +8,18 @@ const { Logger } = require('./utils');
  * Создает временные ссылки на файлы с автоудалением
  */
 class FileServer {
-  constructor(port = 3001, baseUrl = null) {
+  constructor(port = 3001, baseUrl = null, options = {}) {
     this.port = port;
     this.baseUrl = baseUrl || `http://localhost:${port}`;
     this.app = express();
     this.server = null;
     this.temporaryFiles = new Map(); // Map<fileId, {filePath, expiresAt, originalName}>
     this.cleanupInterval = null;
+    
+    // Опции управления ресурсами
+    this.maxConcurrentFiles = options.maxConcurrentFiles || 50;
+    this.autoDeleteAfterDownload = options.autoDeleteAfterDownload !== undefined ? options.autoDeleteAfterDownload : true;
+    this.minFreeSpaceGB = options.minFreeSpaceGB || 5;
     
     this.setupRoutes();
   }
@@ -83,6 +88,14 @@ class FileServer {
             }
           } else {
             Logger.info('File sent successfully', { fileId, originalName: fileInfo.originalName });
+            
+            // Автоудаление файла после успешного скачивания
+            if (this.autoDeleteAfterDownload) {
+              Logger.info('Auto-deleting file after successful download', { fileId });
+              this.removeFile(fileId).catch(removeErr => {
+                Logger.error('Error auto-deleting file', removeErr, { fileId });
+              });
+            }
           }
         });
         
@@ -165,8 +178,28 @@ class FileServer {
    * @param {string} originalName - оригинальное имя файла
    * @param {number} ttlMinutes - время жизни в минутах (по умолчанию 10)
    * @returns {Object} - объект с fileId и downloadUrl
+   * @throws {Error} - если недостаточно ресурсов
    */
-  createTemporaryLink(filePath, originalName, ttlMinutes = 10) {
+  async createTemporaryLink(filePath, originalName, ttlMinutes = 10) {
+    // Проверка лимита одновременных файлов
+    if (this.temporaryFiles.size >= this.maxConcurrentFiles) {
+      Logger.warn('Max concurrent files limit reached', { 
+        current: this.temporaryFiles.size, 
+        max: this.maxConcurrentFiles 
+      });
+      throw new Error('MAX_CONCURRENT_FILES_REACHED');
+    }
+    
+    // Проверка свободного места на диске
+    const freeSpaceGB = await this.checkFreeSpace();
+    if (freeSpaceGB !== null && freeSpaceGB < this.minFreeSpaceGB) {
+      Logger.warn('Insufficient disk space', { 
+        freeSpaceGB, 
+        minRequired: this.minFreeSpaceGB 
+      });
+      throw new Error('INSUFFICIENT_DISK_SPACE');
+    }
+    
     const fileId = this.generateFileId();
     const expiresAt = Date.now() + (ttlMinutes * 60 * 1000);
     
@@ -182,7 +215,9 @@ class FileServer {
       fileId, 
       originalName, 
       ttlMinutes,
-      expiresAt: new Date(expiresAt).toISOString()
+      expiresAt: new Date(expiresAt).toISOString(),
+      currentFiles: this.temporaryFiles.size,
+      freeSpaceGB
     });
     
     return {
@@ -191,6 +226,52 @@ class FileServer {
       expiresAt,
       ttlMinutes
     };
+  }
+  
+  /**
+   * Проверка свободного места на диске
+   * @returns {Promise<number|null>} - свободное место в GB или null если не удалось проверить
+   */
+  async checkFreeSpace() {
+    try {
+      const { execSync } = require('child_process');
+      
+      // Определяем команду в зависимости от ОС
+      let command;
+      if (process.platform === 'win32') {
+        // Windows: используем wmic
+        command = 'wmic logicaldisk get size,freespace,caption';
+      } else {
+        // Linux/Mac: используем df
+        command = `df -k "${this.temporaryFiles.size > 0 ? Array.from(this.temporaryFiles.values())[0].filePath : process.cwd()}" | tail -1`;
+      }
+      
+      const output = execSync(command, { encoding: 'utf8' });
+      
+      if (process.platform === 'win32') {
+        // Парсим вывод Windows
+        const lines = output.trim().split('\n');
+        if (lines.length > 1) {
+          const dataLine = lines[1].trim().split(/\s+/);
+          if (dataLine.length >= 2) {
+            const freeBytes = parseInt(dataLine[1], 10);
+            return freeBytes / (1024 * 1024 * 1024); // Конвертируем в GB
+          }
+        }
+      } else {
+        // Парсим вывод Linux/Mac
+        const parts = output.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const freeKB = parseInt(parts[3], 10);
+          return freeKB / (1024 * 1024); // Конвертируем в GB
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      Logger.warn('Could not check free disk space', { error: error.message });
+      return null;
+    }
   }
 
   /**

@@ -41,6 +41,11 @@ class Config {
     this.LARGE_FILE_TTL_MINUTES = 10; // Время жизни больших файлов в минутах
     this.TELEGRAM_UPLOAD_LIMIT = 524288000; // 500MB - лимит для попытки загрузки в Telegram
     this.TELEGRAM_UPLOAD_TIMEOUT = 600000; // 10 минут - timeout для загрузки в Telegram
+    
+    // File Server - управление ресурсами
+    this.MAX_CONCURRENT_FILES = 50; // Максимум файлов на сервере одновременно
+    this.AUTO_DELETE_AFTER_DOWNLOAD = true; // Автоудаление файла после успешного скачивания
+    this.MIN_FREE_SPACE_GB = 5; // Минимум свободного места на диске (в GB)
   }
 
   /**
@@ -167,6 +172,25 @@ class Config {
         this.TELEGRAM_UPLOAD_TIMEOUT = timeout;
       }
     }
+    
+    // File Server - управление ресурсами
+    if (process.env.MAX_CONCURRENT_FILES) {
+      const max = parseInt(process.env.MAX_CONCURRENT_FILES, 10);
+      if (!isNaN(max) && max > 0) {
+        this.MAX_CONCURRENT_FILES = max;
+      }
+    }
+    
+    if (process.env.AUTO_DELETE_AFTER_DOWNLOAD !== undefined) {
+      this.AUTO_DELETE_AFTER_DOWNLOAD = process.env.AUTO_DELETE_AFTER_DOWNLOAD === 'true';
+    }
+    
+    if (process.env.MIN_FREE_SPACE_GB) {
+      const space = parseFloat(process.env.MIN_FREE_SPACE_GB);
+      if (!isNaN(space) && space > 0) {
+        this.MIN_FREE_SPACE_GB = space;
+      }
+    }
   }
 
   /**
@@ -248,7 +272,10 @@ class Config {
       FILE_SERVER_BASE_URL: this.FILE_SERVER_BASE_URL,
       LARGE_FILE_TTL_MINUTES: this.LARGE_FILE_TTL_MINUTES,
       TELEGRAM_UPLOAD_LIMIT: this.TELEGRAM_UPLOAD_LIMIT,
-      TELEGRAM_UPLOAD_TIMEOUT: this.TELEGRAM_UPLOAD_TIMEOUT
+      TELEGRAM_UPLOAD_TIMEOUT: this.TELEGRAM_UPLOAD_TIMEOUT,
+      MAX_CONCURRENT_FILES: this.MAX_CONCURRENT_FILES,
+      AUTO_DELETE_AFTER_DOWNLOAD: this.AUTO_DELETE_AFTER_DOWNLOAD,
+      MIN_FREE_SPACE_GB: this.MIN_FREE_SPACE_GB
     };
   }
 }

@@ -33,7 +33,12 @@ class BotController {
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
       config.FILE_SERVER_PORT, 
-      config.FILE_SERVER_BASE_URL
+      config.FILE_SERVER_BASE_URL,
+      {
+        maxConcurrentFiles: config.MAX_CONCURRENT_FILES,
+        autoDeleteAfterDownload: config.AUTO_DELETE_AFTER_DOWNLOAD,
+        minFreeSpaceGB: config.MIN_FREE_SPACE_GB
+      }
     );
     
     Logger.info('BotController initialized', {
@@ -543,20 +548,48 @@ class BotController {
           });
           
           // Создаем временную ссылку на сервер
-          const linkInfo = this.fileServer.createTemporaryLink(
-            path.resolve(outputPath), 
-            `${videoInfo.title || videoInfo.id}.mp4`,
-            this.config.LARGE_FILE_TTL_MINUTES
-          );
+          let linkInfo;
+          try {
+            linkInfo = await this.fileServer.createTemporaryLink(
+              path.resolve(outputPath), 
+              `${videoInfo.title || videoInfo.id}.mp4`,
+              this.config.LARGE_FILE_TTL_MINUTES
+            );
+          } catch (linkError) {
+            Logger.error('Failed to create temporary link', linkError, { userId });
+            
+            // Обрабатываем специфические ошибки
+            if (linkError.message === 'MAX_CONCURRENT_FILES_REACHED') {
+              await this.bot.sendMessage(chatId, 
+                `❌ Сервер перегружен. Слишком много активных файлов. Попробуйте через несколько минут.`
+              );
+            } else if (linkError.message === 'INSUFFICIENT_DISK_SPACE') {
+              await this.bot.sendMessage(chatId, 
+                `❌ Недостаточно места на сервере. Попробуйте позже или выберите качество пониже.`
+              );
+            } else {
+              await this.bot.sendMessage(chatId, 
+                `❌ Не удалось создать ссылку для скачивания. Попробуйте позже.`
+              );
+            }
+            
+            throw new Error('UPLOAD_FAILED');
+          }
           
           // Отправляем ссылку пользователю
           const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
           await this.bot.sendMessage(chatId, 
             `📁 <b>Файл готов для скачивания!</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
-            `⏰ Ссылка действует до: ${expiresAt}\n\n` +
-            `🔗 <a href="${linkInfo.downloadUrl}">Скачать файл</a>`,
-            { parse_mode: 'HTML' }
+            `⏰ Ссылка действует до: ${expiresAt}`,
+            { 
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+                ]]
+              }
+            }
           );
           
           Logger.info('Server download link sent', { userId, fileId: linkInfo.fileId });
@@ -578,11 +611,40 @@ class BotController {
         });
         
         // Создаем временную ссылку на сервер
-        const linkInfo = this.fileServer.createTemporaryLink(
-          path.resolve(outputPath), 
-          `${videoInfo.title || videoInfo.id}.mp4`,
-          this.config.LARGE_FILE_TTL_MINUTES
-        );
+        let linkInfo;
+        try {
+          linkInfo = await this.fileServer.createTemporaryLink(
+            path.resolve(outputPath), 
+            `${videoInfo.title || videoInfo.id}.mp4`,
+            this.config.LARGE_FILE_TTL_MINUTES
+          );
+        } catch (linkError) {
+          Logger.error('Failed to create temporary link', linkError, { userId });
+          
+          // Удаляем статусное сообщение
+          try {
+            await this.bot.deleteMessage(chatId, statusMessage.message_id);
+          } catch (deleteError) {
+            Logger.info('Could not delete status message', { userId });
+          }
+          
+          // Обрабатываем специфические ошибки
+          if (linkError.message === 'MAX_CONCURRENT_FILES_REACHED') {
+            await this.bot.sendMessage(chatId, 
+              `❌ Сервер перегружен. Слишком много активных файлов. Попробуйте через несколько минут.`
+            );
+          } else if (linkError.message === 'INSUFFICIENT_DISK_SPACE') {
+            await this.bot.sendMessage(chatId, 
+              `❌ Недостаточно места на сервере. Попробуйте позже или выберите качество пониже.`
+            );
+          } else {
+            await this.bot.sendMessage(chatId, 
+              `❌ Не удалось создать ссылку для скачивания. Попробуйте позже.`
+            );
+          }
+          
+          throw new Error('UPLOAD_FAILED');
+        }
         
         // Удаляем статусное сообщение
         try {
@@ -597,9 +659,15 @@ class BotController {
           `📁 <b>Файл готов для скачивания!</b>\n\n` +
           `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
           `⏰ Ссылка действует до: ${expiresAt}\n\n` +
-          `🔗 <a href="${linkInfo.downloadUrl}">Скачать файл</a>\n\n` +
           `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`,
-          { parse_mode: 'HTML' }
+          { 
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+              ]]
+            }
+          }
         );
         
         Logger.info('Server download link sent for very large file', { userId, fileId: linkInfo.fileId });
