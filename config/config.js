@@ -61,6 +61,15 @@ class Config {
     this.KASPA_ADDRESS = null; // Kaspa адрес
     this.TON_ADDRESS = null; // TON адрес
     this.USDT_ADDRESS = null; // USDT (TRC-20) адрес
+    
+    // Криптовалютные API для проверки балансов
+    this.KASPA_API_URL = 'https://api.kaspa.org'; // Kaspa API
+    this.TON_API_URL = 'https://toncenter.com/api/v2'; // TON API
+    this.TRON_API_URL = 'https://api.trongrid.io'; // TRON API
+    this.TRON_API_KEY = null; // TRON API ключ
+    
+    // Админ
+    this.TELEGRAM_ADMIN_ID = null; // ID админа для доступа к балансам
   }
 
   /**
@@ -254,6 +263,31 @@ class Config {
     if (process.env.USDT_ADDRESS) {
       this.USDT_ADDRESS = process.env.USDT_ADDRESS;
     }
+    
+    // Криптовалютные API настройки
+    if (process.env.KASPA_API_URL) {
+      this.KASPA_API_URL = process.env.KASPA_API_URL;
+    }
+    
+    if (process.env.TON_API_URL) {
+      this.TON_API_URL = process.env.TON_API_URL;
+    }
+    
+    if (process.env.TRON_API_URL) {
+      this.TRON_API_URL = process.env.TRON_API_URL;
+    }
+    
+    if (process.env.TRON_API_KEY) {
+      this.TRON_API_KEY = process.env.TRON_API_KEY;
+    }
+    
+    // Админ настройки
+    if (process.env.TELEGRAM_ADMIN_ID) {
+      const adminId = parseInt(process.env.TELEGRAM_ADMIN_ID, 10);
+      if (!isNaN(adminId)) {
+        this.TELEGRAM_ADMIN_ID = adminId;
+      }
+    }
   }
 
   /**
@@ -347,7 +381,12 @@ class Config {
       DONATION_ALERTS_URL: this.DONATION_ALERTS_URL,
       KASPA_ADDRESS: this.KASPA_ADDRESS,
       TON_ADDRESS: this.TON_ADDRESS,
-      USDT_ADDRESS: this.USDT_ADDRESS
+      USDT_ADDRESS: this.USDT_ADDRESS,
+      KASPA_API_URL: this.KASPA_API_URL,
+      TON_API_URL: this.TON_API_URL,
+      TRON_API_URL: this.TRON_API_URL,
+      TRON_API_KEY: this.TRON_API_KEY,
+      TELEGRAM_ADMIN_ID: this.TELEGRAM_ADMIN_ID
     };
   }
 }

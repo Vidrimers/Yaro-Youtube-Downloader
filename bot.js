@@ -7,6 +7,7 @@ const TelegramApiWrapper = require('./src/telegramWrapper');
 const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
 const SponsorBlock = require('./src/sponsorblock');
+const CryptoApiClient = require('./src/cryptoApi');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
 
 /**
@@ -40,6 +41,7 @@ class BotController {
       baseDelay: config.TELEGRAM_API_BASE_DELAY || 1000,
       maxDelay: config.TELEGRAM_API_MAX_DELAY || 10000
     });
+    this.cryptoApi = new CryptoApiClient(config);
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
       config.RATE_LIMIT_WINDOW_MS
@@ -151,6 +153,15 @@ class BotController {
           
         case 'help':
           await this.telegramHelper.sendHelp(chatId);
+          break;
+          
+        case 'balance':
+          // Команда только для админа
+          if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+            await this.handleBalanceCommand(chatId);
+          } else {
+            Logger.info(`Unauthorized balance command attempt`, { userId, username });
+          }
           break;
           
         default:
@@ -308,7 +319,7 @@ class BotController {
     try {
       // Проверяем, является ли это донатной командой
       if (callbackData === 'donate_menu') {
-        await this.telegramHelper.sendDonateMenu(chatId);
+        await this.telegramHelper.sendDonateMenu(chatId, userId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю меню донатов' });
         return;
       }
@@ -343,6 +354,17 @@ class BotController {
       if (callbackData === 'donate_usdt') {
         await this.telegramHelper.sendUsdtAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю USDT адрес' });
+        return;
+      }
+      
+      // Админская кнопка баланса
+      if (callbackData === 'admin_balance') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.handleBalanceCommand(chatId);
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Получаю балансы...' });
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
         return;
       }
       
@@ -1220,6 +1242,53 @@ class BotController {
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
       } catch (callbackError) {
         Logger.info('Failed to answer callback query', { userId });
+      }
+    }
+  }
+
+  /**
+   * Обрабатывает команду /balance для админа
+   * @param {number} chatId - ID чата
+   */
+  async handleBalanceCommand(chatId) {
+    try {
+      // Отправляем индикатор "печатает..."
+      await this.telegramApi.sendChatAction(chatId, 'typing');
+      
+      // Отправляем сообщение о загрузке
+      const loadingMessage = await this.telegramApi.sendMessage(
+        chatId, 
+        '⏳ Получаю балансы кошельков...'
+      );
+
+      // Получаем балансы всех кошельков
+      const balances = await this.cryptoApi.getAllBalances();
+      
+      // Создаем сообщение с балансами
+      const balanceMessage = this.cryptoApi.createBalanceMessage(balances);
+      
+      // Обновляем сообщение с результатами
+      await this.telegramApi.editMessageText(balanceMessage, {
+        chat_id: chatId,
+        message_id: loadingMessage.message_id,
+        parse_mode: 'HTML'
+      });
+
+      Logger.info('Balance command executed', { 
+        chatId, 
+        balances: Object.keys(balances).map(key => `${key}: ${balances[key]}`)
+      });
+
+    } catch (error) {
+      Logger.error('Error handling balance command', error, { chatId });
+      
+      try {
+        await this.telegramApi.sendMessage(
+          chatId, 
+          '❌ Ошибка получения балансов. Попробуйте позже.'
+        );
+      } catch (sendError) {
+        Logger.error('Failed to send balance error message', sendError, { chatId });
       }
     }
   }

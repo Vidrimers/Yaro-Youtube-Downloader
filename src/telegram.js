@@ -332,9 +332,10 @@ class TelegramHelper {
   /**
    * Отправляет меню донатов
    * @param {number} chatId - ID чата
+   * @param {number} userId - ID пользователя (для проверки админа)
    * @returns {Promise<void>}
    */
-  async sendDonateMenu(chatId) {
+  async sendDonateMenu(chatId, userId = null) {
     const message = `💝 <b>Поддержать проект</b>\n\n` +
                    `Если вам нравится бот и вы хотите поддержать его развитие, вы можете сделать донат.\n\n` +
                    `Ваша поддержка поможет:\n` +
@@ -382,6 +383,14 @@ class TelegramHelper {
     for (let i = 0; i < cryptoButtons.length; i += 2) {
       const row = cryptoButtons.slice(i, i + 2);
       keyboard.inline_keyboard.push(row);
+    }
+
+    // Админская кнопка (только для админа)
+    if (config.TELEGRAM_ADMIN_ID && userId === config.TELEGRAM_ADMIN_ID) {
+      keyboard.inline_keyboard.push([{
+        text: '📊 Баланс кошельков',
+        callback_data: 'admin_balance'
+      }]);
     }
 
     // Кнопка "Назад"

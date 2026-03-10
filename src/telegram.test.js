@@ -363,7 +363,7 @@ describe('TelegramHelper Unit Tests', () => {
       expect(message.text).toContain('Добро пожаловать');
       expect(message.text).toContain('YouTube');
       expect(message.text).toContain('/help');
-      expect(message.options.parse_mode).toBe('Markdown');
+      expect(message.options.parse_mode).toBe('HTML');
     });
   });
 
