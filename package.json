@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node bot.js",
     "dev": "nodemon bot.js",
+    "devtun": "tuna http 3001 --domain=ytdownloader.ru.tuna.am",
     "test": "jest",
     "test:watch": "jest --watch"
   },
