@@ -197,16 +197,10 @@ youtube-downloader-bot/
 │   └── utils.js          # Вспомогательные функции
 ├── config/
 │   └── config.js         # Конфигурация приложения
-├── tests/
-│   ├── unit/             # Unit тесты
-│   ├── property/         # Property-based тесты
-│   └── integration/      # Integration тесты
-└── .kiro/
-    └── specs/            # Спецификации проекта
-        └── youtube-downloader-bot/
-            ├── requirements.md
-            ├── design.md
-            └── tasks.md
+└── tests/
+    ├── unit/             # Unit тесты
+    ├── property/         # Property-based тесты
+    └── integration/      # Integration тесты
 ```
 
 ---
