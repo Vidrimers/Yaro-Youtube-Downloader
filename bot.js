@@ -576,29 +576,48 @@ class BotController {
             throw new Error('UPLOAD_FAILED');
           }
           
-          // Отправляем ссылку пользователю
-          const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
-          await this.bot.sendMessage(chatId, 
-            `📁 <b>Файл готов для скачивания!</b>\n\n` +
-            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
-            `⏰ Ссылка действует до: ${expiresAt}`,
-            { 
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [[
-                  { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
-                ]]
-              }
-            }
-          );
-          
-          Logger.info('Server download link sent', { userId, fileId: linkInfo.fileId });
-          
-          // Помечаем, что файл используется сервером
+          // Помечаем, что файл используется сервером (СРАЗУ после создания ссылки)
           fileUsedByServer = true;
           
           // Удаляем только временные файлы (video и audio), но не outputPath
           await this.fileManager.deleteFiles([videoPath, audioPath].filter(Boolean));
+          
+          // Отправляем ссылку пользователю
+          const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
+          
+          // Проверяем, является ли URL локальным (localhost)
+          const isLocalUrl = linkInfo.downloadUrl.startsWith('http://localhost') || 
+                            linkInfo.downloadUrl.startsWith('http://127.0.0.1');
+          
+          if (isLocalUrl) {
+            // Для локального URL отправляем текстом (Telegram не принимает localhost в кнопках)
+            await this.bot.sendMessage(chatId, 
+              `📁 <b>Файл готов для скачивания!</b>\n\n` +
+              `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+              `⏰ Ссылка действует до: ${expiresAt}\n\n` +
+              `🔗 Ссылка для скачивания:\n<code>${linkInfo.downloadUrl}</code>\n\n` +
+              `ℹ️ Скопируйте ссылку и откройте в браузере`,
+              { parse_mode: 'HTML' }
+            );
+          } else {
+            // Для публичного URL используем кнопку
+            await this.bot.sendMessage(chatId, 
+              `📁 <b>Файл готов для скачивания!</b>\n\n` +
+              `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+              `⏰ Ссылка действует до: ${expiresAt}`,
+              { 
+                parse_mode: 'HTML',
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+                  ]]
+                }
+              }
+            );
+          }
+          
+          Logger.info('Server download link sent', { userId, fileId: linkInfo.fileId });
+          
           return;
         }
         
@@ -646,6 +665,12 @@ class BotController {
           throw new Error('UPLOAD_FAILED');
         }
         
+        // Помечаем, что файл используется сервером (СРАЗУ после создания ссылки)
+        fileUsedByServer = true;
+        
+        // Удаляем только временные файлы (video и audio), но не outputPath
+        await this.fileManager.deleteFiles([videoPath, audioPath].filter(Boolean));
+        
         // Удаляем статусное сообщение
         try {
           await this.bot.deleteMessage(chatId, statusMessage.message_id);
@@ -655,28 +680,42 @@ class BotController {
         
         // Отправляем ссылку пользователю
         const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
-        await this.bot.sendMessage(chatId, 
-          `📁 <b>Файл готов для скачивания!</b>\n\n` +
-          `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
-          `⏰ Ссылка действует до: ${expiresAt}\n\n` +
-          `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`,
-          { 
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [[
-                { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
-              ]]
+        
+        // Проверяем, является ли URL локальным (localhost)
+        const isLocalUrl = linkInfo.downloadUrl.startsWith('http://localhost') || 
+                          linkInfo.downloadUrl.startsWith('http://127.0.0.1');
+        
+        if (isLocalUrl) {
+          // Для локального URL отправляем текстом (Telegram не принимает localhost в кнопках)
+          await this.bot.sendMessage(chatId, 
+            `📁 <b>Файл готов для скачивания!</b>\n\n` +
+            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+            `⏰ Ссылка действует до: ${expiresAt}\n\n` +
+            `🔗 Ссылка для скачивания:\n<code>${linkInfo.downloadUrl}</code>\n\n` +
+            `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.\n` +
+            `Скопируйте ссылку и откройте в браузере`,
+            { parse_mode: 'HTML' }
+          );
+        } else {
+          // Для публичного URL используем кнопку
+          await this.bot.sendMessage(chatId, 
+            `📁 <b>Файл готов для скачивания!</b>\n\n` +
+            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+            `⏰ Ссылка действует до: ${expiresAt}\n\n` +
+            `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`,
+            { 
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+                ]]
+              }
             }
-          }
-        );
+          );
+        }
         
         Logger.info('Server download link sent for very large file', { userId, fileId: linkInfo.fileId });
         
-        // Помечаем, что файл используется сервером
-        fileUsedByServer = true;
-        
-        // Удаляем только временные файлы (video и audio), но не outputPath
-        await this.fileManager.deleteFiles([videoPath, audioPath].filter(Boolean));
         return;
       }
       
