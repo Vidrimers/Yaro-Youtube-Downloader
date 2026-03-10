@@ -13,13 +13,28 @@ function ask(question) {
     }));
 }
 
-// Загружает строки из файла (если файл пустой — возвращает пустой массив)
-function loadLines(path) {
+// Загружает многострочные блоки с разделителем ---
+function loadBlocks(path) {
     if (!fs.existsSync(path)) return [];
-    return fs.readFileSync(path, "utf8")
+
+    const lines = fs.readFileSync(path, "utf8")
         .split("\n")
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
+        .map(line => line.trim());
+
+    const blocks = [];
+    let buffer = [];
+
+    for (const line of lines) {
+        if (line === "---") {
+            const text = buffer.join(" ").trim();
+            if (text.length > 0) blocks.push(text);
+            buffer = [];
+        } else {
+            buffer.push(line);
+        }
+    }
+
+    return blocks;
 }
 
 // Добавляет новые строки в конец, избегая дублей
@@ -39,9 +54,15 @@ function mergeCategory(oldList, newLines) {
 async function main() {
     const outputFile = "jokes.json";
 
+    // Базовая структура с описаниями
     let data = {
+        short_dark_jokes_description: "Короткие шутки в стиле черный юмор. Многострочные. Разделяются в TXT через ---",
         short_dark_jokes: [],
+
+        dark_anecdotes_description: "Длинные анекдоты в стиле черный юмор. Многострочные. Разделяются в TXT через ---",
         dark_anecdotes: [],
+
+        dark_memes_description: "Мемы, однострочные или многострочные в стиле черный юмор. Разделяются в TXT через ---",
         dark_memes: []
     };
 
@@ -59,13 +80,24 @@ async function main() {
         fs.copyFileSync(outputFile, backup);
         console.log(`Создана резервная копия: ${backup}`);
 
+        // Загружаем старые данные
         data = JSON.parse(fs.readFileSync(outputFile, "utf8"));
+
+        // Добавляем описания, если их нет
+        if (!data.short_dark_jokes_description)
+            data.short_dark_jokes_description = "Короткие шутки в стиле черный юмор. Многострочные. Разделяются в TXT через ---";
+
+        if (!data.dark_anecdotes_description)
+            data.dark_anecdotes_description = "Длинные анекдоты в стиле черный юмор. Многострочные. Разделяются в TXT через ---";
+
+        if (!data.dark_memes_description)
+            data.dark_memes_description = "Мемы, однострочные или многострочные в стиле черный юмор. Разделяются в TXT через ---";
     }
 
-    // Загружаем новые строки
-    const shortNew = loadLines("short.txt");
-    const anecdotesNew = loadLines("anecdotes.txt");
-    const memesNew = loadLines("memes.txt");
+    // Загружаем многострочные блоки из TXT
+    const shortNew = loadBlocks("short.txt");
+    const anecdotesNew = loadBlocks("anecdotes.txt");
+    const memesNew = loadBlocks("memes.txt");
 
     // Мерджим категории
     data.short_dark_jokes = mergeCategory(data.short_dark_jokes, shortNew);
