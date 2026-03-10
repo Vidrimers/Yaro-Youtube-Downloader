@@ -355,7 +355,8 @@ describe('BotController', () => {
         // Пользователь НЕ в whitelist, должно быть отправлено сообщение об ошибке
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
           12345,
-          expect.stringContaining('Доступ запрещен')
+          '❌ Доступ запрещен. Этот бот доступен только авторизованным пользователям.',
+          {}
         );
         
         // getVideoInfo НЕ должен быть вызван
@@ -415,7 +416,8 @@ describe('BotController', () => {
         
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
           12345,
-          expect.stringContaining('Доступ запрещен')
+          '❌ Доступ запрещен. Этот бот доступен только авторизованным пользователям.',
+          {}
         );
       });
     });

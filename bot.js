@@ -8,6 +8,7 @@ const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
 const SponsorBlock = require('./src/sponsorblock');
 const CryptoApiClient = require('./src/cryptoApi');
+const JokeManager = require('./src/jokeManager');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
 
 /**
@@ -42,6 +43,7 @@ class BotController {
       maxDelay: config.TELEGRAM_API_MAX_DELAY || 10000
     });
     this.cryptoApi = new CryptoApiClient(config);
+    this.jokeManager = new JokeManager(this.telegramApi);
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
       config.RATE_LIMIT_WINDOW_MS
@@ -528,11 +530,15 @@ class BotController {
     let videoPath = null;
     let audioPath = null;
     let outputPath = null;
+    let finalOutputPath = null;
     let fileUsedByServer = false; // Флаг: файл используется сервером, не удалять
     
     try {
       // Отправляем статус
       statusMessage = await this.telegramHelper.sendDownloadStatus(chatId, 'downloading');
+      
+      // Запускаем отправку шуток во время ожидания
+      this.jokeManager.startJokeInterval(chatId, 20);
       
       // Генерируем пути для файлов
       videoPath = this.fileManager.generateFilePath(videoInfo.id, 'video.mp4');
@@ -637,7 +643,7 @@ class BotController {
       await this.fileManager.mergeVideoAudio(videoPath, audioPath, outputPath);
       
       // Если нужно удалить спонсорские блоки, обрабатываем файл
-      let finalOutputPath = outputPath;
+      finalOutputPath = outputPath;
       if (removeSponsorBlocks && sponsorSegments && sponsorSegments.length > 0) {
         Logger.info('Removing sponsor segments', { userId, segmentsCount: sponsorSegments.length });
         
@@ -1062,6 +1068,9 @@ class BotController {
       
       throw error;
     } finally {
+      // Останавливаем отправку шуток
+      this.jokeManager.stopJokeInterval(chatId);
+      
       // Очищаем временные файлы
       // Если файл используется сервером, не удаляем outputPath (он удалится автоматически по TTL)
       if (!fileUsedByServer) {
@@ -1088,6 +1097,19 @@ class BotController {
     });
     
     await this.initialize();
+    
+    // Добавляем обработчик завершения работы для остановки всех интервалов шуток
+    process.on('SIGINT', () => {
+      Logger.info('Received SIGINT, stopping joke intervals...');
+      this.jokeManager.stopAllIntervals();
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      Logger.info('Received SIGTERM, stopping joke intervals...');
+      this.jokeManager.stopAllIntervals();
+      process.exit(0);
+    });
     
     Logger.info('Bot started successfully! Waiting for messages...');
   }
