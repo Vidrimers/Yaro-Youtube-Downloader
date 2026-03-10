@@ -340,17 +340,24 @@ class BotController {
       // Получаем информацию о спонсорских блоках (если включено)
       let sponsorBlockSegments = null;
       if (this.config.SPONSORBLOCK_ENABLED) {
+        Logger.info('SponsorBlock is enabled, checking segments', { userId, videoId });
         try {
           const segments = await this.sponsorBlock.getSegments(videoId);
+          Logger.info('SponsorBlock API response', { userId, videoId, segments: segments?.length || 0 });
+          
           if (segments && segments.length > 0) {
             sponsorBlockSegments = segments;
             Logger.info('SponsorBlock segments found for callback', { 
               userId, videoId, segmentsCount: segments.length 
             });
+          } else {
+            Logger.info('No SponsorBlock segments found for video', { userId, videoId });
           }
         } catch (sbError) {
           Logger.warn('SponsorBlock request failed in callback', { userId, error: sbError.message });
         }
+      } else {
+        Logger.info('SponsorBlock is disabled', { userId });
       }
 
       // Если есть спонсорские блоки, показываем выбор

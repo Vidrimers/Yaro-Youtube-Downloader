@@ -45,6 +45,12 @@ class SponsorBlock {
         timeout: 10000
       });
 
+      // Отладка: показываем что именно запросили
+      Logger.info('SponsorBlock request URL', { 
+        url: response.config.url,
+        fullUrl: `${response.config.baseURL || ''}${response.config.url}?${new URLSearchParams(response.config.params).toString()}`
+      });
+
       if (response.data && response.data.length > 0) {
         const segments = response.data[0].segments || [];
         Logger.info('SponsorBlock segments found', { 
