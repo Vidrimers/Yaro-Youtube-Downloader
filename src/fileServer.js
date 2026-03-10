@@ -62,11 +62,20 @@ class FileServer {
         
         res.sendFile(path.resolve(fileInfo.filePath), (err) => {
           if (err) {
-            Logger.error('Error sending file', err, { 
-              fileId, 
-              filePath: fileInfo.filePath,
-              errorMessage: err.message 
-            });
+            // Если клиент прервал загрузку (закрыл вкладку/отменил), это не критичная ошибка
+            if (err.message === 'Request aborted') {
+              Logger.warn('File download aborted by client', { 
+                fileId, 
+                filePath: fileInfo.filePath,
+                originalName: fileInfo.originalName
+              });
+            } else {
+              Logger.error('Error sending file', err, { 
+                fileId, 
+                filePath: fileInfo.filePath,
+                errorMessage: err.message 
+              });
+            }
             
             // Если заголовки еще не отправлены, отправляем ошибку
             if (!res.headersSent) {

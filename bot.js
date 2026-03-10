@@ -552,10 +552,11 @@ class BotController {
           // Отправляем ссылку пользователю
           const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
           await this.bot.sendMessage(chatId, 
-            `📁 Файл готов для скачивания!\n\n` +
+            `📁 <b>Файл готов для скачивания!</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}\n\n` +
-            `🔗 Скачать: ${linkInfo.downloadUrl}`
+            `🔗 <a href="${linkInfo.downloadUrl}">Скачать файл</a>`,
+            { parse_mode: 'HTML' }
           );
           
           Logger.info('Server download link sent', { userId, fileId: linkInfo.fileId });
@@ -593,11 +594,12 @@ class BotController {
         // Отправляем ссылку пользователю
         const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
         await this.bot.sendMessage(chatId, 
-          `📁 Файл готов для скачивания!\n\n` +
+          `📁 <b>Файл готов для скачивания!</b>\n\n` +
           `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
           `⏰ Ссылка действует до: ${expiresAt}\n\n` +
-          `🔗 Скачать: ${linkInfo.downloadUrl}\n\n` +
-          `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`
+          `🔗 <a href="${linkInfo.downloadUrl}">Скачать файл</a>\n\n` +
+          `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`,
+          { parse_mode: 'HTML' }
         );
         
         Logger.info('Server download link sent for very large file', { userId, fileId: linkInfo.fileId });
