@@ -46,6 +46,10 @@ class Config {
     this.MAX_CONCURRENT_FILES = 50; // Максимум файлов на сервере одновременно
     this.AUTO_DELETE_AFTER_DOWNLOAD = true; // Автоудаление файла после успешного скачивания
     this.MIN_FREE_SPACE_GB = 5; // Минимум свободного места на диске (в GB)
+    
+    // SponsorBlock интеграция
+    this.SPONSORBLOCK_API_URL = 'https://sponsor.ajay.app'; // URL SponsorBlock API
+    this.SPONSORBLOCK_ENABLED = true; // Включить SponsorBlock интеграцию
   }
 
   /**
@@ -191,6 +195,15 @@ class Config {
         this.MIN_FREE_SPACE_GB = space;
       }
     }
+    
+    // SponsorBlock настройки
+    if (process.env.SPONSORBLOCK_API_URL) {
+      this.SPONSORBLOCK_API_URL = process.env.SPONSORBLOCK_API_URL;
+    }
+    
+    if (process.env.SPONSORBLOCK_ENABLED !== undefined) {
+      this.SPONSORBLOCK_ENABLED = process.env.SPONSORBLOCK_ENABLED === 'true';
+    }
   }
 
   /**
@@ -275,7 +288,9 @@ class Config {
       TELEGRAM_UPLOAD_TIMEOUT: this.TELEGRAM_UPLOAD_TIMEOUT,
       MAX_CONCURRENT_FILES: this.MAX_CONCURRENT_FILES,
       AUTO_DELETE_AFTER_DOWNLOAD: this.AUTO_DELETE_AFTER_DOWNLOAD,
-      MIN_FREE_SPACE_GB: this.MIN_FREE_SPACE_GB
+      MIN_FREE_SPACE_GB: this.MIN_FREE_SPACE_GB,
+      SPONSORBLOCK_API_URL: this.SPONSORBLOCK_API_URL,
+      SPONSORBLOCK_ENABLED: this.SPONSORBLOCK_ENABLED
     };
   }
 }

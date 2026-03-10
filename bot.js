@@ -5,6 +5,7 @@ const VideoProcessor = require('./src/ytdlp');
 const TelegramHelper = require('./src/telegram');
 const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
+const SponsorBlock = require('./src/sponsorblock');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
 
 /**
@@ -25,6 +26,7 @@ class BotController {
     this.videoProcessor = new VideoProcessor();
     this.telegramHelper = new TelegramHelper(this.bot);
     this.fileManager = new FileManager(config.TEMP_DIR, config.MERGE_TIMEOUT);
+    this.sponsorBlock = new SponsorBlock(config.SPONSORBLOCK_API_URL);
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
       config.RATE_LIMIT_WINDOW_MS
@@ -236,11 +238,29 @@ class BotController {
       
       Logger.info('Formats found', { userId, videoId: videoInfo.id, formatsCount: formats.length });
       
+      // Получаем информацию о спонсорских блоках (если включено)
+      let sponsorBlockInfo = null;
+      if (this.config.SPONSORBLOCK_ENABLED) {
+        try {
+          const segments = await this.sponsorBlock.getSegments(videoInfo.id);
+          if (segments && segments.length > 0) {
+            sponsorBlockInfo = this.sponsorBlock.formatSegmentsInfo(segments);
+            Logger.info('SponsorBlock segments found', { 
+              userId, 
+              videoId: videoInfo.id, 
+              segmentsCount: segments.length 
+            });
+          }
+        } catch (sbError) {
+          Logger.warn('SponsorBlock request failed', { userId, error: sbError.message });
+        }
+      }
+      
       // Отправляем варианты качества
       await this.telegramHelper.sendVideoOptions(chatId, {
         ...videoInfo,
         formats
-      });
+      }, sponsorBlockInfo);
       
     } catch (error) {
       Logger.error('Error handling message', error, { userId, username });
@@ -273,7 +293,13 @@ class BotController {
     Logger.userAction(userId, username, 'callback query', { data: callbackData });
     
     try {
-      // Парсим callback data
+      // Проверяем, является ли это SponsorBlock командой
+      if (callbackData.startsWith('sb_')) {
+        await this.handleSponsorBlockCallback(query);
+        return;
+      }
+      
+      // Парсим callback data для обычных команд
       const { Formatter } = require('./src/utils');
       const parsed = Formatter.parseCallbackData(callbackData);
       
@@ -311,6 +337,35 @@ class BotController {
         return;
       }
       
+      // Получаем информацию о спонсорских блоках (если включено)
+      let sponsorBlockSegments = null;
+      if (this.config.SPONSORBLOCK_ENABLED) {
+        try {
+          const segments = await this.sponsorBlock.getSegments(videoId);
+          if (segments && segments.length > 0) {
+            sponsorBlockSegments = segments;
+            Logger.info('SponsorBlock segments found for callback', { 
+              userId, videoId, segmentsCount: segments.length 
+            });
+          }
+        } catch (sbError) {
+          Logger.warn('SponsorBlock request failed in callback', { userId, error: sbError.message });
+        }
+      }
+
+      // Если есть спонсорские блоки, показываем выбор
+      if (sponsorBlockSegments && sponsorBlockSegments.length > 0) {
+        const sponsorBlockInfo = this.sponsorBlock.formatSegmentsInfo(sponsorBlockSegments);
+        sponsorBlockInfo.description = this.sponsorBlock.createSegmentsDescription(sponsorBlockInfo);
+        
+        await this.telegramHelper.sendSponsorBlockChoice(
+          chatId, videoId, formatId, quality, sponsorBlockInfo
+        );
+        await this.bot.answerCallbackQuery(query.id, { text: 'Найдены рекламные блоки!' });
+        return;
+      }
+
+      // Нет спонсорских блоков, скачиваем как обычно
       // Проверяем, является ли формат комбинированным
       const isCombined = this.videoProcessor.isCombinedFormat(format);
       
@@ -319,7 +374,7 @@ class BotController {
         // Формат раздельный - нужно скачать и объединить
         // ВАЖНО: отвечаем на callback query СРАЗУ, до начала скачивания
         await this.bot.answerCallbackQuery(query.id, { text: 'Начинаю скачивание...' });
-        await this.handleMergedDownload(chatId, userId, url, videoInfo, format, quality);
+        await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
       } else {
         // Обычная прямая ссылка
         await this.bot.sendChatAction(chatId, 'typing');
@@ -383,8 +438,10 @@ class BotController {
    * @param {Object} videoInfo - информация о видео
    * @param {Object} format - выбранный формат
    * @param {string} quality - качество
+   * @param {boolean} removeSponsorBlocks - удалять ли спонсорские блоки
+   * @param {Array} sponsorSegments - массив сегментов для удаления (опционально)
    */
-  async handleMergedDownload(chatId, userId, url, videoInfo, format, quality) {
+  async processVideoDownload(chatId, userId, url, videoInfo, format, quality, removeSponsorBlocks = false, sponsorSegments = null) {
     let statusMessage = null;
     let videoPath = null;
     let audioPath = null;
@@ -497,9 +554,30 @@ class BotController {
       Logger.info('Merging video and audio', { userId, videoId: videoInfo.id });
       await this.fileManager.mergeVideoAudio(videoPath, audioPath, outputPath);
       
+      // Если нужно удалить спонсорские блоки, обрабатываем файл
+      let finalOutputPath = outputPath;
+      if (removeSponsorBlocks && sponsorSegments && sponsorSegments.length > 0) {
+        Logger.info('Removing sponsor segments', { userId, segmentsCount: sponsorSegments.length });
+        
+        // Обновляем статус
+        await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'processing');
+        
+        // Создаем путь для файла без рекламы
+        const cleanOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'clean.mp4');
+        
+        // Удаляем сегменты
+        await this.fileManager.removeSegments(outputPath, cleanOutputPath, sponsorSegments);
+        
+        // Удаляем исходный файл с рекламой
+        await this.fileManager.deleteFile(outputPath);
+        
+        finalOutputPath = cleanOutputPath;
+        Logger.info('Sponsor segments removed', { userId });
+      }
+      
       // Проверяем размер файла и выбираем стратегию отправки
-      const fileSize = await this.fileManager.getFileSize(outputPath);
-      Logger.info('File merged', { userId, fileSize });
+      const fileSize = await this.fileManager.getFileSize(finalOutputPath);
+      Logger.info('File processed', { userId, fileSize, removedSponsors: removeSponsorBlocks });
       
       // Лимиты для разных стратегий отправки
       const TELEGRAM_STABLE_LIMIT = 104857600; // 100MB - стабильная отправка
@@ -514,7 +592,7 @@ class BotController {
         await this.bot.sendChatAction(chatId, 'upload_video');
         
         const uploadStartTime = Date.now();
-        await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+        await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
         const uploadDuration = Date.now() - uploadStartTime;
         
         Logger.info('Video uploaded successfully', { userId, videoId: videoInfo.id, fileSize, uploadDuration });
@@ -534,7 +612,7 @@ class BotController {
           await this.bot.sendChatAction(chatId, 'upload_video');
           
           const uploadStartTime = Date.now();
-          await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
           const uploadDuration = Date.now() - uploadStartTime;
           
           Logger.info('Large video uploaded successfully to Telegram', { userId, videoId: videoInfo.id, fileSize, uploadDuration });
@@ -551,7 +629,7 @@ class BotController {
           let linkInfo;
           try {
             linkInfo = await this.fileServer.createTemporaryLink(
-              path.resolve(outputPath), 
+              path.resolve(finalOutputPath), 
               `${videoInfo.title || videoInfo.id}.mp4`,
               this.config.LARGE_FILE_TTL_MINUTES
             );
@@ -633,7 +711,7 @@ class BotController {
         let linkInfo;
         try {
           linkInfo = await this.fileServer.createTemporaryLink(
-            path.resolve(outputPath), 
+            path.resolve(finalOutputPath), 
             `${videoInfo.title || videoInfo.id}.mp4`,
             this.config.LARGE_FILE_TTL_MINUTES
           );
@@ -905,8 +983,8 @@ class BotController {
       // Очищаем временные файлы
       // Если файл используется сервером, не удаляем outputPath (он удалится автоматически по TTL)
       if (!fileUsedByServer) {
-        if (videoPath || audioPath || outputPath) {
-          await this.fileManager.deleteFiles([videoPath, audioPath, outputPath].filter(Boolean));
+        if (videoPath || audioPath || finalOutputPath) {
+          await this.fileManager.deleteFiles([videoPath, audioPath, finalOutputPath].filter(Boolean));
         }
       } else {
         // Если файл на сервере, удаляем только промежуточные файлы (если они еще не удалены)
@@ -942,6 +1020,90 @@ class BotController {
     if (bytes === 0) return '0 B';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  }
+
+  /**
+   * Обработка SponsorBlock callback queries
+   * @param {Object} query - объект callback query
+   */
+  async handleSponsorBlockCallback(query) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const username = query.from.username || 'unknown';
+    const callbackData = query.data;
+
+    try {
+      // Парсим SponsorBlock команду: sb_action_formatId_videoId_quality
+      const parts = callbackData.split('_');
+      if (parts.length < 5) {
+        throw new Error('Invalid SponsorBlock callback format');
+      }
+
+      const action = parts[1]; // remove или keep
+      const formatId = parts[2];
+      const videoId = parts[3];
+      const quality = parts[4];
+
+      Logger.info('Processing SponsorBlock callback', { 
+        userId, action, formatId, videoId, quality 
+      });
+
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+      if (action === 'keep') {
+        // Скачать как есть - используем обычную логику
+        await this.bot.answerCallbackQuery(query.id, { text: 'Скачиваю как есть...' });
+        
+        // Получаем информацию о видео
+        const videoInfo = await this.videoProcessor.getVideoInfo(url);
+        const format = videoInfo.formats.find(f => f.format_id === formatId);
+        
+        if (!format) {
+          throw new Error('FORMAT_NOT_FOUND');
+        }
+
+        // Запускаем обычное скачивание
+        await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
+
+      } else if (action === 'remove') {
+        // Убрать рекламу
+        await this.bot.answerCallbackQuery(query.id, { text: 'Убираю рекламу и скачиваю...' });
+        
+        // Получаем информацию о видео и сегменты
+        const videoInfo = await this.videoProcessor.getVideoInfo(url);
+        const format = videoInfo.formats.find(f => f.format_id === formatId);
+        
+        if (!format) {
+          throw new Error('FORMAT_NOT_FOUND');
+        }
+
+        const segments = await this.sponsorBlock.getSegments(videoId);
+        
+        if (!segments || segments.length === 0) {
+          // Нет сегментов для удаления, скачиваем как есть
+          await this.bot.sendMessage(chatId, 
+            'ℹ️ Рекламные блоки не найдены, скачиваю как есть'
+          );
+          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
+        } else {
+          // Есть сегменты, скачиваем с удалением рекламы
+          await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, true, segments);
+        }
+      }
+
+    } catch (error) {
+      Logger.error('Error handling SponsorBlock callback', error, { 
+        userId, username, callbackData 
+      });
+
+      await this.telegramHelper.sendError(chatId, 'unknown');
+      
+      try {
+        await this.bot.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
+      } catch (callbackError) {
+        Logger.info('Failed to answer callback query', { userId });
+      }
+    }
   }
 }
 

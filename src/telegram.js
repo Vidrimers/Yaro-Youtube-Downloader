@@ -45,18 +45,25 @@ class TelegramHelper {
    * Отправляет сообщение с вариантами качества видео
    * @param {number} chatId - ID чата
    * @param {Object} videoInfo - информация о видео
+   * @param {Object} sponsorBlockInfo - информация о спонсорских блоках (опционально)
    * @returns {Promise<void>}
    */
-  async sendVideoOptions(chatId, videoInfo) {
+  async sendVideoOptions(chatId, videoInfo, sponsorBlockInfo = null) {
     const formats = videoInfo.formats || [];
     const keyboard = this.createQualityKeyboard(formats, videoInfo.id);
     
     const duration = Formatter.formatDuration(videoInfo.duration || 0);
     
-    const message = `📹 *${this.escapeMarkdown(videoInfo.title)}*\n\n` +
-                   `⏱ Длительность: ${duration}\n` +
-                   `👤 Автор: ${this.escapeMarkdown(videoInfo.uploader || 'Неизвестно')}\n\n` +
-                   `Выберите качество для скачивания:`;
+    let message = `📹 *${this.escapeMarkdown(videoInfo.title)}*\n\n` +
+                  `⏱ Длительность: ${duration}\n` +
+                  `👤 Автор: ${this.escapeMarkdown(videoInfo.uploader || 'Неизвестно')}\n\n`;
+    
+    // Добавляем информацию о спонсорских блоках если есть
+    if (sponsorBlockInfo && sponsorBlockInfo.totalSegments > 0) {
+      message += `🎯 Найдено рекламных блоков: ${sponsorBlockInfo.totalSegments} (${sponsorBlockInfo.totalDurationFormatted})\n\n`;
+    }
+    
+    message += `Выберите качество для скачивания:`;
 
     await this.bot.sendMessage(chatId, message, {
       parse_mode: 'Markdown',
@@ -296,6 +303,42 @@ class TelegramHelper {
   escapeMarkdown(text) {
     if (!text) return '';
     return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  }
+
+  /**
+   * Отправляет выбор: скачать с рекламой или без
+   * @param {number} chatId - ID чата
+   * @param {string} videoId - ID видео
+   * @param {string} formatId - ID формата
+   * @param {string} quality - качество видео
+   * @param {Object} sponsorBlockInfo - информация о спонсорских блоках
+   * @returns {Promise<void>}
+   */
+  async sendSponsorBlockChoice(chatId, videoId, formatId, quality, sponsorBlockInfo) {
+    const message = sponsorBlockInfo.description + '\n\n' +
+                   '❓ Как скачать видео?';
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { 
+            text: '✂️ Убрать рекламу', 
+            callback_data: `sb_remove_${formatId}_${videoId}_${quality}` 
+          }
+        ],
+        [
+          { 
+            text: '📥 Скачать как есть', 
+            callback_data: `sb_keep_${formatId}_${videoId}_${quality}` 
+          }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
   }
 }
 

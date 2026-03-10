@@ -198,6 +198,121 @@ class FileManager {
       });
     });
   }
+
+  /**
+   * Вырезает сегменты из видео (удаляет рекламные блоки)
+   * @param {string} inputPath - путь к исходному видео
+   * @param {string} outputPath - путь для сохранения результата
+   * @param {Array} segments - массив сегментов для удаления [{start, end}, ...]
+   * @returns {Promise<string>} - путь к обработанному файлу
+   */
+  async removeSegments(inputPath, outputPath, segments) {
+    return new Promise((resolve, reject) => {
+      if (!segments || segments.length === 0) {
+        reject(new Error('NO_SEGMENTS_PROVIDED'));
+        return;
+      }
+
+      Logger.info('Removing segments from video', { 
+        inputPath, 
+        segmentsCount: segments.length 
+      });
+
+      // Сортируем сегменты по времени начала
+      const sortedSegments = segments
+        .map(s => ({ start: s.segment[0], end: s.segment[1] }))
+        .sort((a, b) => a.start - b.start);
+
+      // Создаем список частей видео, которые нужно оставить
+      const keepParts = [];
+      let lastEnd = 0;
+
+      sortedSegments.forEach(segment => {
+        // Добавляем часть до текущего сегмента
+        if (segment.start > lastEnd) {
+          keepParts.push({ start: lastEnd, end: segment.start });
+        }
+        lastEnd = segment.end;
+      });
+
+      // Добавляем последнюю часть (от последнего сегмента до конца)
+      // Используем большое число как "конец видео"
+      keepParts.push({ start: lastEnd, end: 999999 });
+
+      Logger.info('Video parts to keep', { partsCount: keepParts.length });
+
+      // Создаем filter_complex для ffmpeg
+      let filterComplex = '';
+      let concatInputs = '';
+
+      keepParts.forEach((part, index) => {
+        const duration = part.end - part.start;
+        filterComplex += `[0:v]trim=start=${part.start}:duration=${duration},setpts=PTS-STARTPTS[v${index}];`;
+        filterComplex += `[0:a]atrim=start=${part.start}:duration=${duration},asetpts=PTS-STARTPTS[a${index}];`;
+        concatInputs += `[v${index}][a${index}]`;
+      });
+
+      filterComplex += `${concatInputs}concat=n=${keepParts.length}:v=1:a=1[outv][outa]`;
+
+      let timedOut = false;
+
+      // Запускаем ffmpeg с filter_complex
+      const ffmpeg = spawn('ffmpeg', [
+        '-i', inputPath,
+        '-filter_complex', filterComplex,
+        '-map', '[outv]',
+        '-map', '[outa]',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-c:a', 'aac',
+        outputPath
+      ]);
+
+      let stderr = '';
+
+      // Устанавливаем timeout (увеличенный, т.к. перекодирование медленнее)
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        ffmpeg.kill('SIGTERM');
+        
+        setTimeout(() => {
+          if (!ffmpeg.killed) {
+            ffmpeg.kill('SIGKILL');
+          }
+        }, 1000);
+        
+        reject(new Error('REMOVE_SEGMENTS_TIMEOUT'));
+      }, this.mergeTimeout * 3); // Утроенный timeout для перекодирования
+
+      // Собираем stderr для логирования
+      ffmpeg.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      // Обрабатываем завершение
+      ffmpeg.on('close', (code) => {
+        clearTimeout(timeoutId);
+        
+        if (timedOut) {
+          return;
+        }
+        
+        if (code === 0) {
+          Logger.info('Segments removed successfully', { outputPath });
+          resolve(outputPath);
+        } else {
+          Logger.error('ffmpeg remove segments failed', new Error(stderr), { code });
+          reject(new Error('REMOVE_SEGMENTS_FAILED'));
+        }
+      });
+
+      ffmpeg.on('error', (error) => {
+        clearTimeout(timeoutId);
+        Logger.error('ffmpeg process error during segment removal', error);
+        reject(error);
+      });
+    });
+  }
 }
 
 module.exports = FileManager;
