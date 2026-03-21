@@ -49,6 +49,12 @@ class BotController {
       config.RATE_LIMIT_WINDOW_MS
     );
     
+    // Состояния ожидания сообщения от пользователя для связи с админом
+    // Map<userId, true> — пользователь в режиме написания сообщения
+    this.pendingUserMessages = new Map();
+    // Map<adminId, { targetUserId, userText }> — админ в режиме ответа пользователю
+    this.pendingAdminReplies = new Map();
+    
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
       config.FILE_SERVER_PORT, 
@@ -190,6 +196,35 @@ class BotController {
     Logger.userAction(userId, username, 'sent message', { text });
     
     try {
+      // Если пользователь в режиме написания сообщения админу
+      if (this.pendingUserMessages.has(userId)) {
+        this.pendingUserMessages.delete(userId);
+        await this.notifyAdmin(
+          `✉️ <b>Сообщение от пользователя</b>\n` +
+          `👤 @${username} (ID: <code>${userId}</code>)\n\n` +
+          `${text}`,
+          {
+            inline_keyboard: [[
+              { text: '↩️ Ответить', callback_data: `reply_${userId}` }
+            ]]
+          }
+        );
+        // Сохраняем текст пользователя для цитаты в ответе
+        this.pendingAdminReplies.set(`pending_text_${userId}`, text);
+        await this.telegramApi.sendMessage(chatId, '✅ Сообщение отправлено администратору.');
+        return;      }
+
+      // Если админ в режиме ответа пользователю
+      if (userId === this.config.TELEGRAM_ADMIN_ID && this.pendingAdminReplies.has(userId)) {
+        const { targetUserId, userText } = this.pendingAdminReplies.get(userId);
+        this.pendingAdminReplies.delete(userId);
+        this.pendingAdminReplies.delete(`pending_text_${targetUserId}`);
+        const quote = userText ? `<blockquote>${userText}</blockquote>\n\n` : '';
+        await this.telegramApi.sendMessage(targetUserId, `📩 <b>Ответ от администратора:</b>\n\n${quote}${text}`, { parse_mode: 'HTML' });
+        await this.telegramApi.sendMessage(chatId, '✅ Ответ отправлен пользователю.');
+        return;
+      }
+
       // Проверка whitelist (если настроен)
       if (this.config.ALLOWED_USERS.length > 0) {
         if (!this.config.ALLOWED_USERS.includes(userId)) {
@@ -224,6 +259,15 @@ class BotController {
       
       // Регистрируем запрос
       this.rateLimiter.recordRequest(userId);
+      
+      // Уведомляем админа о новом запросе
+      if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+        this.notifyAdmin(
+          `🔗 <b>Новый запрос</b>\n` +
+          `👤 @${username} (ID: <code>${userId}</code>)\n` +
+          `🎬 <code>${text}</code>`
+        ).catch(() => {});
+      }
       
       // Нормализуем URL
       const normalizedUrl = URLValidator.normalizeUrl(text);
@@ -319,10 +363,38 @@ class BotController {
     Logger.userAction(userId, username, 'callback query', { data: callbackData });
     
     try {
+      // Обработка кнопки "Написать администратору"
+      if (callbackData === 'contact_admin') {
+        if (!this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Администратор не настроен' });
+          return;
+        }
+        this.pendingUserMessages.set(userId, true);
+        await this.telegramApi.sendMessage(chatId, '✍️ Напишите ваше сообщение, и я передам его администратору:');
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Напишите сообщение' });
+        return;
+      }
+
+      // Обработка кнопки "Ответить" от админа
+      if (callbackData.startsWith('reply_')) {
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещён' });
+          return;
+        }
+        const targetUserId = parseInt(callbackData.replace('reply_', ''));
+        this.pendingAdminReplies.set(this.config.TELEGRAM_ADMIN_ID, { targetUserId, userText: this.pendingAdminReplies.get(`pending_text_${targetUserId}`) || null });
+        await this.telegramApi.sendMessage(chatId, `✍️ Напишите ответ пользователю (ID: <code>${targetUserId}</code>):`, { parse_mode: 'HTML' });
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Напишите ответ' });
+        return;
+      }
+
       // Проверяем, является ли это донатной командой
       if (callbackData === 'donate_menu') {
         await this.telegramHelper.sendDonateMenu(chatId, userId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю меню донатов' });
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          this.notifyAdmin(`💝 <b>Донат меню</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл меню донатов`).catch(() => {});
+        }
         return;
       }
       
@@ -344,18 +416,21 @@ class BotController {
       if (callbackData === 'donate_kaspa') {
         await this.telegramHelper.sendKaspaAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю Kaspa адрес' });
+        this.notifyAdmin(`💎 <b>Донат: Kaspa</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес Kaspa`).catch(() => {});
         return;
       }
       
       if (callbackData === 'donate_ton') {
         await this.telegramHelper.sendTonAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю TON адрес' });
+        this.notifyAdmin(`💠 <b>Донат: TON</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес TON`).catch(() => {});
         return;
       }
       
       if (callbackData === 'donate_usdt') {
         await this.telegramHelper.sendUsdtAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю USDT адрес' });
+        this.notifyAdmin(`💵 <b>Донат: USDT</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес USDT`).catch(() => {});
         return;
       }
       
@@ -1328,6 +1403,22 @@ class BotController {
       } catch (callbackError) {
         Logger.info('Failed to answer callback query', { userId });
       }
+    }
+  }
+
+  /**
+   * Отправляет уведомление админу
+   * @param {string} message - текст уведомления
+   * @param {Object} [replyMarkup] - опциональная inline клавиатура
+   */
+  async notifyAdmin(message, replyMarkup = null) {
+    if (!this.config.TELEGRAM_ADMIN_ID) return;
+    try {
+      const options = { parse_mode: 'HTML' };
+      if (replyMarkup) options.reply_markup = replyMarkup;
+      await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID, message, options);
+    } catch (error) {
+      Logger.warn('Failed to notify admin', { error: error.message });
     }
   }
 

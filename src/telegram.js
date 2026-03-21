@@ -239,10 +239,18 @@ class TelegramHelper {
     };
 
     const message = errorMessages[errorType] || errorMessages.unknown;
-    
-    await this.bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown'
-    });
+
+    // Для unknown ошибки добавляем кнопку "Написать администратору"
+    const options = { parse_mode: 'Markdown' };
+    if (!errorMessages[errorType] || errorType === 'unknown') {
+      options.reply_markup = {
+        inline_keyboard: [[
+          { text: '✍️ Написать администратору', callback_data: 'contact_admin' }
+        ]]
+      };
+    }
+
+    await this.bot.sendMessage(chatId, message, options);
   }
 
   /**
