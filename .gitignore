@@ -37,6 +37,7 @@ tuna-tutor
 tuna-config.yml
 *.log
 test-output.txt
+bans.json
 migration-*.sql
 server/src/database/migrations/*.js
 server/scripts/migrate-*.js

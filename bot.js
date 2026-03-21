@@ -10,6 +10,7 @@ const SponsorBlock = require('./src/sponsorblock');
 const CryptoApiClient = require('./src/cryptoApi');
 const JokeManager = require('./src/jokeManager');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
+const { BanManager, BAN_LABELS } = require('./src/banManager');
 
 /**
  * BotController - главный контроллер Telegram бота
@@ -54,6 +55,15 @@ class BotController {
     this.pendingUserMessages = new Map();
     // Map<adminId, { targetUserId, userText }> — админ в режиме ответа пользователю
     this.pendingAdminReplies = new Map();
+
+    // Менеджер банов
+    this.banManager = new BanManager();
+
+    // Кэш username пользователей для системы банов
+    this.usernames = new Map();
+
+    // Map<adminId, { targetUserId, duration }> — ожидание причины бана от админа
+    this.pendingBanReasons = new Map();
     
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
@@ -80,6 +90,9 @@ class BotController {
     
     // Инициализируем FileManager
     await this.fileManager.initialize();
+
+    // Загружаем баны
+    await this.banManager.load();
     
     // Запускаем файловый сервер
     try {
@@ -195,7 +208,18 @@ class BotController {
     
     Logger.userAction(userId, username, 'sent message', { text });
     
+    // Кэшируем username для системы банов
+    this.usernames.set(userId, username);
+    
     try {
+      // Проверка бана
+      const banStatus = this.banManager.isBanned(userId);
+      if (banStatus.banned) {
+        const until = banStatus.until ? `до ${this.banManager.formatUntil(banStatus.until)}` : 'навсегда';
+        await this.telegramApi.sendMessage(chatId, `🚫 Вы заблокированы ${until}.`);
+        return;
+      }
+
       // Если пользователь в режиме написания сообщения админу
       if (this.pendingUserMessages.has(userId)) {
         this.pendingUserMessages.delete(userId);
@@ -203,11 +227,8 @@ class BotController {
           `✉️ <b>Сообщение от пользователя</b>\n` +
           `👤 @${username} (ID: <code>${userId}</code>)\n\n` +
           `${text}`,
-          {
-            inline_keyboard: [[
-              { text: '↩️ Ответить', callback_data: `reply_${userId}` }
-            ]]
-          }
+          this.banManager.getNotifyKeyboard(userId, true),
+          null
         );
         // Сохраняем текст пользователя для цитаты в ответе
         this.pendingAdminReplies.set(`pending_text_${userId}`, text);
@@ -222,6 +243,14 @@ class BotController {
         const quote = userText ? `<blockquote>${userText}</blockquote>\n\n` : '';
         await this.telegramApi.sendMessage(targetUserId, `📩 <b>Ответ от администратора:</b>\n\n${quote}${text}`, { parse_mode: 'HTML' });
         await this.telegramApi.sendMessage(chatId, '✅ Ответ отправлен пользователю.');
+        return;
+      }
+
+      // Если админ вводит причину бана
+      if (userId === this.config.TELEGRAM_ADMIN_ID && this.pendingBanReasons.has(userId)) {
+        const { targetUserId, duration, targetUsername } = this.pendingBanReasons.get(userId);
+        this.pendingBanReasons.delete(userId);
+        await this._executeBan(chatId, targetUserId, targetUsername, duration, text);
         return;
       }
 
@@ -246,6 +275,15 @@ class BotController {
       if (!URLValidator.isYouTubeUrl(text)) {
         Logger.info('Invalid YouTube URL', { userId, url: text });
         await this.telegramHelper.sendError(chatId, 'invalid_url');
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          this.notifyAdmin(
+            `⚠️ <b>Неверная ссылка</b>\n` +
+            `👤 @${username} (ID: <code>${userId}</code>)\n` +
+            `📝 <code>${text}</code>`,
+            null,
+            userId
+          ).catch(() => {});
+        }
         return;
       }
       
@@ -265,7 +303,9 @@ class BotController {
         this.notifyAdmin(
           `🔗 <b>Новый запрос</b>\n` +
           `👤 @${username} (ID: <code>${userId}</code>)\n` +
-          `🎬 <code>${text}</code>`
+          `🎬 <code>${text}</code>`,
+          null,
+          userId
         ).catch(() => {});
       }
       
@@ -362,7 +402,71 @@ class BotController {
     
     Logger.userAction(userId, username, 'callback query', { data: callbackData });
     
+    // Кэшируем username для системы банов
+    this.usernames.set(userId, username);
+    
     try {
+      // Обработка кнопки "Бан" — показываем меню выбора срока
+      if (callbackData.startsWith('ban_menu_')) {
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещён' });
+          return;
+        }
+        const targetUserId = parseInt(callbackData.replace('ban_menu_', ''));
+        await this.telegramApi.sendMessage(
+          chatId,
+          `🚫 Выберите срок бана для пользователя <code>${targetUserId}</code>:`,
+          { parse_mode: 'HTML', reply_markup: this.banManager.getBanKeyboard(targetUserId) }
+        );
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Выберите срок' });
+        return;
+      }
+
+      // Пропуск причины бана
+      if (callbackData.startsWith('ban_skip_')) {
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещён' });
+          return;
+        }
+        const parts = callbackData.split('_'); // ban_skip_{userId}_{duration}
+        const targetUserId = parseInt(parts[2]);
+        const duration = parts[3];
+        const targetUsername = this.usernames.get(targetUserId) || String(targetUserId);
+        this.pendingBanReasons.delete(userId);
+        await this._executeBan(chatId, targetUserId, targetUsername, duration, null);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Забанен' });
+        return;
+      }
+
+      // Обработка выбора срока бана
+      if (callbackData.startsWith('ban_') && !callbackData.startsWith('ban_menu_') && !callbackData.startsWith('ban_skip_')) {
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещён' });
+          return;
+        }
+        const parts = callbackData.split('_'); // ban_{userId}_{duration}
+        const targetUserId = parseInt(parts[1]);
+        const duration = parts[2];
+        const targetUsername = this.usernames.get(targetUserId) || String(targetUserId);
+
+        // Спрашиваем причину бана
+        this.pendingBanReasons.set(userId, { targetUserId, duration, targetUsername });
+        await this.telegramApi.sendMessage(
+          chatId,
+          `✍️ Укажите причину бана для @${targetUsername} на <b>${BAN_LABELS[duration]}</b>\nИли нажмите "Пропустить":`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: 'Пропустить', callback_data: `ban_skip_${targetUserId}_${duration}` }
+              ]]
+            }
+          }
+        );
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Укажите причину' });
+        return;
+      }
+
       // Обработка кнопки "Написать администратору"
       if (callbackData === 'contact_admin') {
         if (!this.config.TELEGRAM_ADMIN_ID) {
@@ -393,7 +497,7 @@ class BotController {
         await this.telegramHelper.sendDonateMenu(chatId, userId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю меню донатов' });
         if (userId !== this.config.TELEGRAM_ADMIN_ID) {
-          this.notifyAdmin(`💝 <b>Донат меню</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл меню донатов`).catch(() => {});
+          this.notifyAdmin(`💝 <b>Донат меню</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл меню донатов`, null, userId).catch(() => {});
         }
         return;
       }
@@ -416,21 +520,21 @@ class BotController {
       if (callbackData === 'donate_kaspa') {
         await this.telegramHelper.sendKaspaAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю Kaspa адрес' });
-        this.notifyAdmin(`💎 <b>Донат: Kaspa</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес Kaspa`).catch(() => {});
+        this.notifyAdmin(`💎 <b>Донат: Kaspa</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес Kaspa`, null, userId).catch(() => {});
         return;
       }
       
       if (callbackData === 'donate_ton') {
         await this.telegramHelper.sendTonAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю TON адрес' });
-        this.notifyAdmin(`💠 <b>Донат: TON</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес TON`).catch(() => {});
+        this.notifyAdmin(`💠 <b>Донат: TON</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес TON`, null, userId).catch(() => {});
         return;
       }
       
       if (callbackData === 'donate_usdt') {
         await this.telegramHelper.sendUsdtAddress(chatId);
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Показываю USDT адрес' });
-        this.notifyAdmin(`💵 <b>Донат: USDT</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес USDT`).catch(() => {});
+        this.notifyAdmin(`💵 <b>Донат: USDT</b>\n👤 @${username} (ID: <code>${userId}</code>) открыл адрес USDT`, null, userId).catch(() => {});
         return;
       }
       
@@ -1407,15 +1511,43 @@ class BotController {
   }
 
   /**
+   * Выполняет бан пользователя и уведомляет обе стороны
+   */
+  async _executeBan(adminChatId, targetUserId, targetUsername, duration, reason) {
+    await this.banManager.ban(targetUserId, targetUsername, duration, reason);
+    const label = BAN_LABELS[duration];
+    await this.telegramApi.sendMessage(
+      adminChatId,
+      `✅ @${targetUsername} забанен на <b>${label}</b>${reason ? `\n📝 Причина: ${reason}` : ''}.`,
+      { parse_mode: 'HTML' }
+    );
+    // Уведомляем пользователя
+    try {
+      const userMsg = duration === 'forever'
+        ? '🚫 Вы были заблокированы навсегда.'
+        : `🚫 Вы были заблокированы на ${label}.`;
+      await this.telegramApi.sendMessage(targetUserId, userMsg);
+      if (reason) {
+        await this.telegramApi.sendMessage(targetUserId, `📝 Причина: ${reason}`);
+      }
+    } catch { /* пользователь мог заблокировать бота */ }
+  }
+
+  /**
    * Отправляет уведомление админу
    * @param {string} message - текст уведомления
    * @param {Object} [replyMarkup] - опциональная inline клавиатура
+   * @param {number} [targetUserId] - ID пользователя для кнопки бана
    */
-  async notifyAdmin(message, replyMarkup = null) {
+  async notifyAdmin(message, replyMarkup = null, targetUserId = null) {
     if (!this.config.TELEGRAM_ADMIN_ID) return;
     try {
       const options = { parse_mode: 'HTML' };
-      if (replyMarkup) options.reply_markup = replyMarkup;
+      if (replyMarkup) {
+        options.reply_markup = replyMarkup;
+      } else if (targetUserId) {
+        options.reply_markup = this.banManager.getNotifyKeyboard(targetUserId);
+      }
       await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID, message, options);
     } catch (error) {
       Logger.warn('Failed to notify admin', { error: error.message });
