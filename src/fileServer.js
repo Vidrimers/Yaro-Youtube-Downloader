@@ -28,6 +28,11 @@ class FileServer {
    * Настройка маршрутов Express
    */
   setupRoutes() {
+    // Маршрут для страницы донатов
+    this.app.get('/donate', (req, res) => {
+      res.sendFile(path.resolve('donate.html'));
+    });
+
     // Маршрут для скачивания файлов
     this.app.get('/download/:fileId', async (req, res) => {
       const { fileId } = req.params;

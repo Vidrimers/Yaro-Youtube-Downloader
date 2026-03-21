@@ -28,11 +28,8 @@ class CryptoApiClient {
     }
 
     try {
-      // Убираем префикс kaspa: если есть
-      const cleanAddress = address.replace('kaspa:', '');
-      
       const response = await axios.get(
-        `${this.config.KASPA_API_URL}/addresses/${cleanAddress}/balance`,
+        `${this.config.KASPA_API_URL}/addresses/${address}/balance`,
         { timeout: this.httpTimeout }
       );
 
@@ -42,7 +39,7 @@ class CryptoApiClient {
         const balanceInKas = balanceInSomoshi / 100000000;
         
         Logger.info('Kaspa balance retrieved', { 
-          address: cleanAddress, 
+          address, 
           balance: balanceInKas 
         });
         

@@ -255,7 +255,25 @@ describe('Config Module', () => {
         FILE_SERVER_BASE_URL: null,
         LARGE_FILE_TTL_MINUTES: 10,
         TELEGRAM_UPLOAD_LIMIT: 524288000, // 500MB
-        TELEGRAM_UPLOAD_TIMEOUT: 600000 // 10 минут
+        TELEGRAM_UPLOAD_TIMEOUT: 600000, // 10 минут
+        // Новые параметры
+        AUTO_DELETE_AFTER_DOWNLOAD: true,
+        DONATION_ALERTS_URL: "https://dalink.to/v1drimers",
+        KASPA_ADDRESS: null,
+        KASPA_API_URL: "https://api.kaspa.org",
+        MAX_CONCURRENT_FILES: 50,
+        MIN_FREE_SPACE_GB: 5,
+        SPONSORBLOCK_API_URL: "https://sponsor.ajay.app",
+        SPONSORBLOCK_ENABLED: true,
+        TELEGRAM_ADMIN_ID: null,
+        TELEGRAM_API_BASE_DELAY: 1000,
+        TELEGRAM_API_MAX_DELAY: 10000,
+        TELEGRAM_API_MAX_RETRIES: 3,
+        TON_ADDRESS: null,
+        TON_API_URL: "https://toncenter.com/api/v2",
+        TRON_API_KEY: null,
+        TRON_API_URL: "https://api.trongrid.io",
+        USDT_ADDRESS: null
       });
     });
   });

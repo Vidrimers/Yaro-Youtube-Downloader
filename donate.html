@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Поддержать автора</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { font-size: 62.5%; }
+
+  body {
+    font-family: Arial, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    margin: 0;
+    padding: 2rem;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal {
+    background: #161b22;
+    border-radius: 12px;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: #e6edf3;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2rem 2.5rem 1rem;
+    border-bottom: 1px solid #30363d;
+  }
+
+  .title {
+    font-size: 2.4rem;
+    font-weight: 600;
+    margin: 0;
+    color: #e6edf3;
+  }
+
+  .content {
+    padding: 2rem 2.5rem 2.5rem;
+  }
+
+  .description {
+    text-align: center;
+    font-size: 1.6rem;
+    color: #8b949e;
+    margin-bottom: 3rem;
+  }
+
+  .wallets {
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  .wallet {
+    background: #1f242d;
+    border-radius: 10px;
+    padding: 1rem 2rem;
+    border: 1px solid #30363d;
+  }
+
+  .wallet-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .wallet-name {
+    font-size: 2rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .wallet-content {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2rem;
+    align-items: start;
+  }
+
+  .address-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .address-box {
+    background: #0d1117;
+    padding: 1.2rem;
+    border-radius: 8px;
+    word-break: break-all;
+    font-family: 'Courier New', monospace;
+    font-size: 1.4rem;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    line-height: 1.4;
+    min-height: 3.2rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .copied-message {
+    color: #2ea043;
+    font-weight: 600;
+    animation: fadeInOut 2s ease-in-out;
+  }
+
+  @keyframes fadeInOut {
+    0%   { opacity: 0; transform: translateY(-5px); }
+    20%  { opacity: 1; transform: translateY(0); }
+    80%  { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-5px); }
+  }
+
+  .copy-button {
+    background: #238636;
+    border: none;
+    padding: 1rem 1.5rem;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    font-size: 1.4rem;
+    font-weight: 500;
+    transition: background 0.2s;
+    align-self: flex-start;
+  }
+
+  .copy-button:hover  { background: #2ea043; }
+  .copy-button:active { background: #1a7f37; }
+
+  .qr-section {
+    display: flex;
+    justify-content: center;
+  }
+
+  .qr-code {
+    width: 160px;
+    height: 160px;
+    border-radius: 8px;
+    background: white;
+    padding: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-20px) scale(0.95); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    body { padding: 1rem; }
+    .modal { max-height: 95vh; }
+    .header { padding: 1.5rem 2rem 1rem; }
+    .title { font-size: 2rem; }
+    .content { padding: 1.5rem 2rem 2rem; }
+    .description { font-size: 1.4rem; margin-bottom: 2rem; }
+    .wallets { gap: 2rem; }
+    .wallet { padding: 1.5rem; }
+    .wallet-name { font-size: 1.8rem; }
+    .wallet-content { grid-template-columns: 1fr; gap: 1.5rem; }
+    .qr-section { order: -1; }
+    .qr-code { width: 140px; height: 140px; }
+    .address-box { font-size: 1.2rem; padding: 1rem; }
+    .copy-button { font-size: 1.3rem; padding: 0.8rem 1.2rem; }
+  }
+
+  @media (max-width: 480px) {
+    body { padding: 0.5rem; }
+    .header { padding: 1rem 1.5rem 0.5rem; }
+    .title { font-size: 1.8rem; }
+    .content { padding: 1rem 1.5rem 1.5rem; }
+    .description { font-size: 1.3rem; }
+    .wallet { padding: 1rem; }
+    .wallet-name { font-size: 1.6rem; }
+    .qr-code { width: 120px; height: 120px; }
+    .address-box { font-size: 1.1rem; padding: 0.8rem; }
+    .copy-button { font-size: 1.2rem; padding: 0.7rem 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="modal">
+  <div class="header">
+    <h2 class="title">Поддержать автора</h2>
+  </div>
+
+  <div class="content">
+    <p class="description">Спасибо за поддержку проекта ❤️</p>
+
+    <div class="wallets" id="wallets-container">
+      <div class="wallet">
+        <div class="wallet-header">
+          <h3 class="wallet-name" style="color: #f4a261">DonationAlerts</h3>
+        </div>
+        <div class="wallet-content">
+          <div class="address-section">
+            <div class="address-box" id="address-donation">https://dalink.to/v1drimers</div>
+            <div style="display:flex; gap: 1rem; flex-wrap: wrap;">
+              <button class="copy-button" onclick="copyAddress('https://dalink.to/v1drimers', 'donation')">Скопировать адрес</button>
+              <a href="https://dalink.to/v1drimers" target="_blank" rel="noopener noreferrer" class="copy-button" style="text-decoration:none; background:#0088cc;">Перейти</a>
+            </div>
+          </div>
+          <div class="qr-section">
+            <img
+              class="qr-code"
+              src="https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=https%3A%2F%2Fdalink.to%2Fv1drimers"
+              alt="QR код для DonationAlerts"
+              loading="lazy"
+              onerror="this.src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https%3A%2F%2Fdalink.to%2Fv1drimers'; this.onerror=function(){this.style.display='none'};"
+            />
+          </div>
+        </div>
+      </div>
+      <!-- Крипто-кошельки рендерятся через JS -->
+    </div>
+  </div>
+</div>
+
+<script>
+  const FALLBACK_WALLETS = [
+    { id: 1, name: 'Kaspa',        address: 'kaspa:qzdkq9n6p0rgp7fg3cyhuq4uznfy6a4csh5jcqt4gs355zyf3r3t2eszhhc9c', color: '#70c7ba' },
+    { id: 2, name: 'TON',          address: 'UQB6VnvZJXUfq3CW-xS6ku38t3fIK7RJ30a5TMTGJiJal8tr',                color: '#0088cc' },
+    { id: 3, name: 'USDT (TRC-20)',address: 'TYYvAa7u8agTheFHoJK6sGqPV2E6UJd6Er',                              color: '#26a17b' }
+  ];
+
+  // Состояние скопированного адреса
+  let copiedAddress = null;
+
+  function generateQRUrl(text) {
+    return `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(text)}`;
+  }
+
+  function generateQRUrlFallback(text) {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(text)}`;
+  }
+
+  function copyAddress(address, walletId) {
+    const addressBox = document.getElementById(`address-${walletId}`);
+
+    const showCopied = () => {
+      copiedAddress = address;
+      addressBox.innerHTML = `<span class="copied-message">Адрес скопирован!</span>`;
+      setTimeout(() => {
+        addressBox.textContent = address;
+        copiedAddress = null;
+      }, 2000);
+    };
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(address).then(showCopied).catch(() => fallbackCopy(address, showCopied));
+    } else {
+      fallbackCopy(address, showCopied);
+    }
+  }
+
+  function fallbackCopy(text, callback) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    callback();
+  }
+
+  function renderWallets(wallets) {
+    const container = document.getElementById('wallets-container');
+    container.innerHTML += wallets.map(wallet => `
+      <div class="wallet">
+        <div class="wallet-header">
+          <h3 class="wallet-name" style="color: ${wallet.color}">${wallet.name}</h3>
+        </div>
+        <div class="wallet-content">
+          <div class="address-section">
+            <div class="address-box" id="address-${wallet.id}">${wallet.address}</div>
+            <button class="copy-button" onclick="copyAddress('${wallet.address}', ${wallet.id})">
+              Скопировать адрес
+            </button>
+          </div>
+          <div class="qr-section">
+            <img
+              class="qr-code"
+              src="${generateQRUrl(wallet.address)}"
+              alt="QR код для ${wallet.name}"
+              loading="lazy"
+              onerror="this.src='${generateQRUrlFallback(wallet.address)}'; this.onerror=function(){this.style.display='none'};"
+            />
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function loadWallets() {
+    try {
+      const response = await fetch('/api/donate-wallets');
+      if (!response.ok) throw new Error('Ошибка загрузки');
+      const data = await response.json();
+      if (data.data && data.data.length > 0) {
+        renderWallets(data.data);
+        return;
+      }
+    } catch {
+      // Используем fallback
+    }
+    renderWallets(FALLBACK_WALLETS);
+  }
+
+  loadWallets();
+</script>
+
+</body>
+</html>

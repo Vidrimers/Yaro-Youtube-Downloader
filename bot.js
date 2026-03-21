@@ -401,17 +401,29 @@ class BotController {
         return;
       }
       
-      const format = videoInfo.formats.find(f => f.format_id === formatId);
+      let format = this.findFormatWithFallback(videoInfo.formats, formatId, quality, videoId, userId);
       
       if (!format) {
-        Logger.error('Format not found', new Error('Format not found'), { 
+        Logger.error('No alternative format found', new Error('Format not found'), { 
           formatId, 
           videoId,
-          availableFormats: videoInfo.formats.map(f => f.format_id).join(', ')
+          quality,
+          availableFormats: videoInfo.formats.map(f => `${f.format_id}(${f.height}p)`).join(', ')
         });
         await this.telegramHelper.sendError(chatId, 'format_unavailable');
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Формат не найден' });
         return;
+      }
+      
+      // Уведомляем пользователя о результате поиска формата
+      if (format.format_id !== formatId) {
+        // Найден альтернативный формат
+        await this.telegramApi.answerCallbackQuery(query.id, { 
+          text: `Используется альтернативный формат ${format.format_note || format.height + 'p'}` 
+        });
+      } else {
+        // Точный формат найден
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Начинаю скачивание...' });
       }
       
       // Получаем информацию о спонсорских блоках (если включено)
@@ -443,7 +455,7 @@ class BotController {
         sponsorBlockInfo.description = this.sponsorBlock.createSegmentsDescription(sponsorBlockInfo);
         
         await this.telegramHelper.sendSponsorBlockChoice(
-          chatId, videoId, formatId, quality, sponsorBlockInfo
+          chatId, videoId, format.format_id, quality, sponsorBlockInfo
         );
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Найдены рекламные блоки!' });
         return;
@@ -456,15 +468,12 @@ class BotController {
       // Проверяем, нужно ли объединять видео и аудио
       if (!isCombined) {
         // Формат раздельный - нужно скачать и объединить
-        // ВАЖНО: отвечаем на callback query СРАЗУ, до начала скачивания
-        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Начинаю скачивание...' });
         await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
       } else {
         // Обычная прямая ссылка
         await this.telegramApi.sendChatAction(chatId, 'typing');
-        const directUrl = await this.videoProcessor.getDirectUrl(url, formatId);
-        await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, formatId, url);
-        await this.telegramApi.answerCallbackQuery(query.id, { text: `Ссылка для ${quality} готова!` });
+        const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id);
+        await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
       }
       
     } catch (error) {
@@ -1127,6 +1136,60 @@ class BotController {
   }
 
   /**
+   * Находит формат видео с fallback механизмом
+   * @private
+   * @param {Array} formats - массив доступных форматов
+   * @param {string} formatId - искомый ID формата
+   * @param {string} quality - качество видео (например, "1080p")
+   * @param {string} videoId - ID видео для логирования
+   * @param {number} userId - ID пользователя для логирования
+   * @returns {Object|null} - найденный формат или null
+   */
+  findFormatWithFallback(formats, formatId, quality, videoId, userId) {
+    // Сначала ищем точное совпадение
+    let format = formats.find(f => f.format_id === formatId);
+    
+    if (!format) {
+      Logger.warn('Exact format not found, searching for alternative', { 
+        formatId, 
+        videoId, 
+        quality,
+        availableFormats: formats.map(f => f.format_id).join(', ')
+      });
+      
+      // Извлекаем разрешение из quality (например, "1080p" -> 1080)
+      const targetHeight = parseInt(quality.replace('p', ''));
+      
+      // Ищем альтернативный формат с тем же разрешением
+      const alternativeFormats = formats.filter(f => {
+        const formatHeight = f.height || 0;
+        const formatNote = f.format_note || '';
+        
+        // Проверяем по высоте или по format_note
+        return formatHeight === targetHeight || 
+               formatNote.includes(`${targetHeight}p`) ||
+               formatNote.includes(quality);
+      });
+      
+      if (alternativeFormats.length > 0) {
+        // Выбираем лучший альтернативный формат (предпочитаем комбинированные)
+        format = alternativeFormats.find(f => f.vcodec !== 'none' && f.acodec !== 'none') || 
+                 alternativeFormats[0];
+        
+        Logger.info('Found alternative format', { 
+          originalFormatId: formatId,
+          alternativeFormatId: format.format_id,
+          quality: format.format_note || `${format.height}p`,
+          videoId,
+          userId
+        });
+      }
+    }
+    
+    return format;
+  }
+
+  /**
    * Обработка SponsorBlock callback queries
    * @param {Object} query - объект callback query
    */
@@ -1164,7 +1227,7 @@ class BotController {
         
         // Получаем информацию о видео
         const videoInfo = await this.videoProcessor.getVideoInfo(url);
-        const format = videoInfo.formats.find(f => f.format_id === formatId);
+        const format = this.findFormatWithFallback(videoInfo.formats, formatId, quality, videoId, userId);
         
         if (!format) {
           throw new Error('FORMAT_NOT_FOUND');
@@ -1217,7 +1280,7 @@ class BotController {
           
           // Получаем информацию о видео
           const videoInfo = await this.videoProcessor.getVideoInfo(url);
-          const format = videoInfo.formats.find(f => f.format_id === formatId);
+          const format = this.findFormatWithFallback(videoInfo.formats, formatId, quality, videoId, userId);
           
           if (!format) {
             throw new Error('FORMAT_NOT_FOUND');
@@ -1232,7 +1295,7 @@ class BotController {
           
           // Получаем информацию о видео и сегменты
           const videoInfo = await this.videoProcessor.getVideoInfo(url);
-          const format = videoInfo.formats.find(f => f.format_id === formatId);
+          const format = this.findFormatWithFallback(videoInfo.formats, formatId, quality, videoId, userId);
           
           if (!format) {
             throw new Error('FORMAT_NOT_FOUND');

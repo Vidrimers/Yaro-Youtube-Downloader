@@ -668,7 +668,7 @@ describe('BotController', () => {
         
         expect(mockBot.answerCallbackQuery).toHaveBeenCalledWith(
           'query123',
-          expect.objectContaining({ text: expect.stringContaining('1080p') })
+          expect.objectContaining({ text: 'Начинаю скачивание...' })
         );
       });
       
