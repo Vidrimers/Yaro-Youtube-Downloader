@@ -66,7 +66,7 @@ class BanManager {
     // Бан истёк — удаляем
     this.bans.delete(userId);
     this.save().catch(() => {});
-    return { banned: false };
+    return { banned: false, justUnbanned: true };
   }
 
   /**

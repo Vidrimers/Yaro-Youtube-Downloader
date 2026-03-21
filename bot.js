@@ -219,6 +219,9 @@ class BotController {
         await this.telegramApi.sendMessage(chatId, `🚫 Вы заблокированы ${until}.`);
         return;
       }
+      if (banStatus.justUnbanned) {
+        await this.telegramApi.sendMessage(chatId, 'Ты разблокирован, больше не хуей если что ;-)');
+      }
 
       // Если пользователь в режиме написания сообщения админу
       if (this.pendingUserMessages.has(userId)) {
