@@ -70,6 +70,9 @@ class URLValidator {
   static isSupportedUrl(url) {
     return this.isYouTubeUrl(url) || this.isInstagramUrl(url);
   }
+
+  /**
+   * Извлекает video ID из YouTube URL
    * @param {string} url - YouTube URL
    * @returns {string|null} - video ID или null если не найден
    */
