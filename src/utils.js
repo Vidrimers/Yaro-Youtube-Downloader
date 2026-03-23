@@ -56,7 +56,7 @@ class URLValidator {
       const validDomains = ['instagram.com', 'www.instagram.com'];
       if (!validDomains.includes(hostname)) return false;
       // Reels, posts, stories
-      return /^\/(reel|p|stories)\//.test(urlObj.pathname);
+      return /^\/(reels?|p|stories)\//.test(urlObj.pathname);
     } catch {
       return false;
     }
