@@ -170,6 +170,16 @@ class BotController {
       switch (command) {
         case 'start':
           await this.telegramHelper.sendWelcome(chatId);
+          // Показываем постоянную кнопку меню только для админа
+          if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+            await this.telegramApi.sendMessage(chatId, '🔑 Режим администратора активен', {
+              reply_markup: {
+                keyboard: [[{ text: '🛠 Админ панель' }]],
+                resize_keyboard: true,
+                persistent: true
+              }
+            });
+          }
           break;
           
         case 'help':
@@ -230,6 +240,12 @@ class BotController {
       }
       if (banStatus.justUnbanned) {
         await this.telegramApi.sendMessage(chatId, 'Ты разблокирован, больше не хуей если что ;-)');
+      }
+
+      // Кнопка "Админ панель" из reply_keyboard (только для админа)
+      if (text === '🛠 Админ панель' && this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+        await this.handleAdminMenu(chatId);
+        return;
       }
 
       // Если пользователь в режиме написания сообщения админу
