@@ -212,7 +212,8 @@ class TelegramHelper {
       invalid_url: '❌ *Неверная ссылка*\n\nПожалуйста, отправьте корректную ссылку на YouTube видео.\n\n' +
                    'Примеры:\n' +
                    '• https://www.youtube.com/watch?v=VIDEO_ID\n' +
-                   '• https://youtu.be/VIDEO_ID',
+                   '• https://youtu.be/VIDEO_ID\n\n' +
+                   '⚠️ Instagram — в разработке, пока недоступен.',
       
       video_unavailable: '❌ *Видео недоступно*\n\nВидео может быть:\n' +
                         '• Удалено\n' +
@@ -260,12 +261,13 @@ class TelegramHelper {
    */
   async sendWelcome(chatId) {
     const message = `👋 <b>Добро пожаловать!</b>\n\n` +
-                   `Я помогу вам скачать YouTube и Instagram видео с возможностью удаления рекламы.\n\n` +
+                   `Я помогу вам скачать YouTube видео с возможностью удаления рекламы.\n\n` +
                    `<b>Как использовать:</b>\n` +
-                   `1️⃣ Отправьте мне ссылку на YouTube или Instagram видео\n` +
+                   `1️⃣ Отправьте мне ссылку на YouTube видео\n` +
                    `2️⃣ Выберите нужное качество\n` +
                    `3️⃣ Выберите что удалить из видео (реклама, интро и т.д.)\n` +
                    `4️⃣ Получите готовое видео в Telegram или по ссылке\n\n` +
+                   `⚠️ <b>Instagram</b> — в разработке, скоро будет доступен.\n\n` +
                    `Используйте /help для получения дополнительной информации.`;
 
     const keyboard = {
@@ -296,9 +298,7 @@ class TelegramHelper {
                    `YouTube:\n` +
                    `• https://www.youtube.com/watch?v=VIDEO_ID\n` +
                    `• https://youtu.be/VIDEO_ID\n\n` +
-                   `Instagram:\n` +
-                   `• https://www.instagram.com/reel/...\n` +
-                   `• https://www.instagram.com/p/...\n\n` +
+                   `⚠️ <b>Instagram</b> — в разработке, скоро будет доступен.\n\n` +
                    `<b>Доступные качества:</b>\n` +
                    `• 1080p (Full HD)\n` +
                    `• 720p (HD)\n` +
