@@ -44,7 +44,32 @@ class URLValidator {
   }
 
   /**
-   * Извлекает video ID из YouTube URL
+   * Проверяет, является ли URL валидным Instagram URL
+   * @param {string} url - URL для проверки
+   * @returns {boolean}
+   */
+  static isInstagramUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname.toLowerCase();
+      const validDomains = ['instagram.com', 'www.instagram.com'];
+      if (!validDomains.includes(hostname)) return false;
+      // Reels, posts, stories
+      return /^\/(reel|p|stories)\//.test(urlObj.pathname);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Проверяет, является ли URL поддерживаемым (YouTube или Instagram)
+   * @param {string} url - URL для проверки
+   * @returns {boolean}
+   */
+  static isSupportedUrl(url) {
+    return this.isYouTubeUrl(url) || this.isInstagramUrl(url);
+  }
    * @param {string} url - YouTube URL
    * @returns {string|null} - video ID или null если не найден
    */
@@ -81,12 +106,9 @@ class URLValidator {
    * @returns {string} - нормализованный URL в формате https://www.youtube.com/watch?v=VIDEO_ID
    */
   static normalizeUrl(url) {
+    if (this.isInstagramUrl(url)) return url;
     const videoId = this.extractVideoId(url);
-    
-    if (!videoId) {
-      return url;
-    }
-
+    if (!videoId) return url;
     return `https://www.youtube.com/watch?v=${videoId}`;
   }
 }

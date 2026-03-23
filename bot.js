@@ -275,8 +275,8 @@ class BotController {
       }
       
       // Валидация URL
-      if (!URLValidator.isYouTubeUrl(text)) {
-        Logger.info('Invalid YouTube URL', { userId, url: text });
+      if (!URLValidator.isSupportedUrl(text)) {
+        Logger.info('Invalid URL', { userId, url: text });
         await this.telegramHelper.sendError(chatId, 'invalid_url');
         if (userId !== this.config.TELEGRAM_ADMIN_ID) {
           this.notifyAdmin(
@@ -306,7 +306,7 @@ class BotController {
         this.notifyAdmin(
           `🔗 <b>Новый запрос</b>\n` +
           `👤 @${username} (ID: <code>${userId}</code>)\n` +
-          `🎬 <code>${text}</code>`,
+          `${URLValidator.isInstagramUrl(text) ? '📸 Instagram' : '🎬 YouTube'}: <code>${text}</code>`,
           null,
           userId
         ).catch(() => {});
