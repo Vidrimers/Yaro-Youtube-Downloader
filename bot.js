@@ -184,6 +184,15 @@ class BotController {
             Logger.info(`Unauthorized balance command attempt`, { userId, username });
           }
           break;
+
+        case 'admin':
+          // Команда только для админа
+          if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+            await this.handleAdminMenu(chatId);
+          } else {
+            Logger.info(`Unauthorized admin command attempt`, { userId, username });
+          }
+          break;
           
         default:
           // Игнорируем неизвестные команды
@@ -546,6 +555,39 @@ class BotController {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
           await this.handleBalanceCommand(chatId);
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Получаю балансы...' });
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
+      // Админское меню
+      if (callbackData === 'admin_menu') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.handleAdminMenu(chatId);
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю меню' });
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
+      // Проверка занятого места
+      if (callbackData === 'admin_disk_info') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Проверяю...' });
+          await this.handleAdminDiskInfo(chatId);
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
+      // Очистка папки с видео
+      if (callbackData === 'admin_clear_videos') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Очищаю...' });
+          await this.handleAdminClearVideos(chatId);
         } else {
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
         }
@@ -1554,6 +1596,114 @@ class BotController {
       await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID, message, options);
     } catch (error) {
       Logger.warn('Failed to notify admin', { error: error.message });
+    }
+  }
+
+  /**
+   * Отправляет админское меню с инлайн-кнопками
+   * @param {number} chatId - ID чата
+   */
+  async handleAdminMenu(chatId) {
+    await this.telegramApi.sendMessage(
+      chatId,
+      '🛠 <b>Панель администратора</b>',
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '💾 Проверить место', callback_data: 'admin_disk_info' },
+              { text: '🗑 Очистить видео', callback_data: 'admin_clear_videos' }
+            ],
+            [
+              { text: '💰 Балансы кошельков', callback_data: 'admin_balance' }
+            ]
+          ]
+        }
+      }
+    );
+  }
+
+  /**
+   * Показывает информацию о занятом месте в папке temp
+   * @param {number} chatId - ID чата
+   */
+  async handleAdminDiskInfo(chatId) {
+    const fs = require('fs').promises;
+    const path = require('path');
+
+    try {
+      const tempDir = this.config.TEMP_DIR;
+      let totalSize = 0;
+      let fileCount = 0;
+
+      try {
+        const files = await fs.readdir(tempDir);
+        for (const file of files) {
+          try {
+            const stats = await fs.stat(path.join(tempDir, file));
+            if (stats.isFile()) {
+              totalSize += stats.size;
+              fileCount++;
+            }
+          } catch { /* пропускаем недоступные файлы */ }
+        }
+      } catch {
+        await this.telegramApi.sendMessage(chatId, `❌ Папка <code>${tempDir}</code> не найдена или недоступна.`, { parse_mode: 'HTML' });
+        return;
+      }
+
+      await this.telegramApi.sendMessage(
+        chatId,
+        `📂 <b>Папка:</b> <code>${tempDir}</code>\n` +
+        `📄 <b>Файлов:</b> ${fileCount}\n` +
+        `💾 <b>Занято:</b> ${this.formatFileSize(totalSize)}`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (error) {
+      Logger.error('Error getting disk info', error, { chatId });
+      await this.telegramApi.sendMessage(chatId, '❌ Ошибка при проверке места.');
+    }
+  }
+
+  /**
+   * Очищает все файлы в папке temp
+   * @param {number} chatId - ID чата
+   */
+  async handleAdminClearVideos(chatId) {
+    const fs = require('fs').promises;
+    const path = require('path');
+
+    try {
+      const tempDir = this.config.TEMP_DIR;
+      let deletedCount = 0;
+      let freedBytes = 0;
+
+      const files = await fs.readdir(tempDir);
+      for (const file of files) {
+        const filePath = path.join(tempDir, file);
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.isFile()) {
+            freedBytes += stats.size;
+            await fs.unlink(filePath);
+            deletedCount++;
+          }
+        } catch { /* пропускаем файлы, которые не удалось удалить */ }
+      }
+
+      await this.telegramApi.sendMessage(
+        chatId,
+        `✅ <b>Очистка завершена</b>\n` +
+        `🗑 Удалено файлов: <b>${deletedCount}</b>\n` +
+        `💾 Освобождено: <b>${this.formatFileSize(freedBytes)}</b>`,
+        { parse_mode: 'HTML' }
+      );
+
+      Logger.info('Admin cleared temp folder', { chatId, deletedCount, freedBytes });
+    } catch (error) {
+      Logger.error('Error clearing temp folder', error, { chatId });
+      await this.telegramApi.sendMessage(chatId, '❌ Ошибка при очистке папки.');
     }
   }
 
