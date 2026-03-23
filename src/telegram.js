@@ -260,9 +260,9 @@ class TelegramHelper {
    */
   async sendWelcome(chatId) {
     const message = `👋 <b>Добро пожаловать!</b>\n\n` +
-                   `Я помогу вам скачать YouTube видео с возможностью удаления рекламы.\n\n` +
+                   `Я помогу вам скачать YouTube и Instagram видео с возможностью удаления рекламы.\n\n` +
                    `<b>Как использовать:</b>\n` +
-                   `1️⃣ Отправьте мне ссылку на YouTube видео\n` +
+                   `1️⃣ Отправьте мне ссылку на YouTube или Instagram видео\n` +
                    `2️⃣ Выберите нужное качество\n` +
                    `3️⃣ Выберите что удалить из видео (реклама, интро и т.д.)\n` +
                    `4️⃣ Получите готовое видео в Telegram или по ссылке\n\n` +
@@ -293,9 +293,12 @@ class TelegramHelper {
   async sendHelp(chatId) {
     const message = `📖 <b>Справка</b>\n\n` +
                    `<b>Поддерживаемые форматы ссылок:</b>\n` +
+                   `YouTube:\n` +
                    `• https://www.youtube.com/watch?v=VIDEO_ID\n` +
-                   `• https://youtu.be/VIDEO_ID\n` +
-                   `• https://m.youtube.com/watch?v=VIDEO_ID\n\n` +
+                   `• https://youtu.be/VIDEO_ID\n\n` +
+                   `Instagram:\n` +
+                   `• https://www.instagram.com/reel/...\n` +
+                   `• https://www.instagram.com/p/...\n\n` +
                    `<b>Доступные качества:</b>\n` +
                    `• 1080p (Full HD)\n` +
                    `• 720p (HD)\n` +
