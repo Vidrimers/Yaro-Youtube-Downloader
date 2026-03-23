@@ -122,6 +122,21 @@ class BanManager {
   }
 
   /**
+   * Возвращает список активных банов
+   * @returns {Array<{ userId, username, until, reason }>}
+   */
+  getActiveBans() {
+    const now = Date.now();
+    const result = [];
+    for (const [userId, info] of this.bans) {
+      // Пропускаем истёкшие временные баны
+      if (info.until !== null && now >= info.until) continue;
+      result.push({ userId, username: info.username, until: info.until, reason: info.reason || null });
+    }
+    return result;
+  }
+
+  /**
    * Возвращает клавиатуру уведомления с кнопками "Бан" и "Ответить"
    */
   getNotifyKeyboard(userId, withReply = false) {

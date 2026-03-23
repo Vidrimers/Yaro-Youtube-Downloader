@@ -561,6 +561,35 @@ class BotController {
         return;
       }
 
+      // Список банов
+      if (callbackData === 'admin_bans') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Загружаю...' });
+          await this.handleAdminBansList(chatId);
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
+      // Разбан пользователя
+      if (callbackData.startsWith('unban_')) {
+        if (userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещён' });
+          return;
+        }
+        const targetUserId = parseInt(callbackData.replace('unban_', ''));
+        await this.banManager.unban(targetUserId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Пользователь разбанен' });
+        // Уведомляем пользователя
+        try {
+          await this.telegramApi.sendMessage(targetUserId, '✅ Вы были разблокированы.');
+        } catch { /* пользователь мог заблокировать бота */ }
+        // Обновляем список банов
+        await this.handleAdminBansList(chatId);
+        return;
+      }
+
       // Админское меню
       if (callbackData === 'admin_menu') {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
@@ -1600,6 +1629,39 @@ class BotController {
   }
 
   /**
+   * Показывает список активных банов с кнопками разбана
+   * @param {number} chatId - ID чата
+   */
+  async handleAdminBansList(chatId) {
+    const activeBans = this.banManager.getActiveBans();
+
+    if (activeBans.length === 0) {
+      await this.telegramApi.sendMessage(chatId, '✅ Забаненных пользователей нет.');
+      return;
+    }
+
+    // Формируем текст и кнопки разбана для каждого
+    const lines = activeBans.map((ban, i) => {
+      const until = ban.until === null ? 'навсегда' : `до ${this.banManager.formatUntil(ban.until)}`;
+      const reason = ban.reason ? `\n   📝 ${ban.reason}` : '';
+      return `${i + 1}. @${ban.username || ban.userId} (ID: <code>${ban.userId}</code>)\n   ⏱ ${until}${reason}`;
+    });
+
+    const keyboard = activeBans.map(ban => ([
+      { text: `🔓 Разбанить @${ban.username || ban.userId}`, callback_data: `unban_${ban.userId}` }
+    ]));
+
+    await this.telegramApi.sendMessage(
+      chatId,
+      `🚫 <b>Забаненные пользователи (${activeBans.length}):</b>\n\n${lines.join('\n\n')}`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: keyboard }
+      }
+    );
+  }
+
+  /**
    * Отправляет админское меню с инлайн-кнопками
    * @param {number} chatId - ID чата
    */
@@ -1617,6 +1679,9 @@ class BotController {
             ],
             [
               { text: '💰 Балансы кошельков', callback_data: 'admin_balance' }
+            ],
+            [
+              { text: '🚫 Баны', callback_data: 'admin_bans' }
             ]
           ]
         }
