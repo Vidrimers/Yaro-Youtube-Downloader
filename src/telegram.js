@@ -209,7 +209,7 @@ class TelegramHelper {
    */
   async sendError(chatId, errorType, details = '') {
     const errorMessages = {
-      invalid_url: '❌ *Неверная ссылка*\n\nПожалуйста, отправьте корректную ссылку на YouTube видео.\n\n' +
+      invalid_url: '❌ Неверная ссылка\n\nПожалуйста, отправьте корректную ссылку на YouTube видео.\n\n' +
                    'Примеры:\n' +
                    '• https://www.youtube.com/shorts/VIDEO_ID\n' +
                    '• https://www.youtube.com/watch?v=VIDEO_ID\n' +
