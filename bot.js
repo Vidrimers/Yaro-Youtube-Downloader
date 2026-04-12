@@ -139,11 +139,28 @@ class BotController {
     
     Logger.info('Bot handlers registered successfully');
 
+    // Регистрируем команды для всех пользователей — появится кнопка "Меню"
+    try {
+      await this.bot.setMyCommands([
+        { command: 'start', description: '🏠 Главное меню' },
+        { command: 'donate', description: '💝 Донатная' },
+        { command: 'contact', description: '✍️ Написать администратору' },
+      ]);
+      Logger.info('User commands registered');
+    } catch (error) {
+      Logger.warn('Failed to register user commands', { error: error.message });
+    }
+
     // Регистрируем команду /admin только для админа — появится кнопка "Меню"
     if (this.config.TELEGRAM_ADMIN_ID) {
       try {
         await this.bot.setMyCommands(
-          [{ command: 'admin', description: '🛠 Панель администратора' }],
+          [
+            { command: 'start', description: '🏠 Главное меню' },
+            { command: 'donate', description: '💝 Донатная' },
+            { command: 'contact', description: '✍️ Написать администратору' },
+            { command: 'admin', description: '🛠 Панель администратора' },
+          ],
           { scope: { type: 'chat', chat_id: this.config.TELEGRAM_ADMIN_ID } }
         );
         Logger.info('Admin commands registered', { adminId: this.config.TELEGRAM_ADMIN_ID });
@@ -187,6 +204,14 @@ class BotController {
           
         case 'help':
           await this.telegramHelper.sendHelp(chatId);
+          break;
+
+        case 'donate':
+          await this.telegramHelper.sendDonateMenu(chatId, userId);
+          break;
+
+        case 'contact':
+          await this.telegramApi.sendMessage(chatId, '✍️ Напишите ваше сообщение, и я передам его администратору.');
           break;
           
         case 'balance':
