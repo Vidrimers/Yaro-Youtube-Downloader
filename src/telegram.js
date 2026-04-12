@@ -211,6 +211,7 @@ class TelegramHelper {
     const errorMessages = {
       invalid_url: '❌ *Неверная ссылка*\n\nПожалуйста, отправьте корректную ссылку на YouTube видео.\n\n' +
                    'Примеры:\n' +
+                   '• https://www.youtube.com/shorts/VIDEO_ID\n' +
                    '• https://www.youtube.com/watch?v=VIDEO_ID\n' +
                    '• https://youtu.be/VIDEO_ID\n\n' +
                    '⚠️ Instagram — в разработке, пока недоступен.',
