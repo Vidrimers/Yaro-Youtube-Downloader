@@ -27,9 +27,12 @@ class URLValidator {
         return false;
       }
 
-      // Для youtube.com проверяем наличие параметра v
+      // Для youtube.com проверяем наличие параметра v или Shorts
       if (hostname.includes('youtube.com')) {
-        return urlObj.pathname === '/watch' && urlObj.searchParams.has('v');
+        if (urlObj.pathname === '/watch' && urlObj.searchParams.has('v')) return true;
+        // Поддержка YouTube Shorts: /shorts/VIDEO_ID
+        const shortsMatch = urlObj.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})/);
+        return !!shortsMatch;
       }
 
       // Для youtu.be проверяем наличие video ID в pathname
@@ -85,8 +88,11 @@ class URLValidator {
       const urlObj = new URL(url);
       const hostname = urlObj.hostname.toLowerCase();
 
-      // Для youtube.com извлекаем из параметра v
+      // Для youtube.com извлекаем из параметра v или из /shorts/
       if (hostname.includes('youtube.com')) {
+        // Shorts: /shorts/VIDEO_ID
+        const shortsMatch = urlObj.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})/);
+        if (shortsMatch) return shortsMatch[1];
         const videoId = urlObj.searchParams.get('v');
         return videoId && videoId.length === 11 ? videoId : null;
       }
