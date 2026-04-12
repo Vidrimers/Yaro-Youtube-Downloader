@@ -143,6 +143,7 @@ class BotController {
     try {
       await this.bot.setMyCommands([
         { command: 'start', description: '🏠 Главное меню' },
+        { command: 'help', description: '❓ Помощь' },
         { command: 'donate', description: '💝 Донатная' },
         { command: 'contact', description: '✍️ Написать администратору' },
       ]);
@@ -157,6 +158,7 @@ class BotController {
         await this.bot.setMyCommands(
           [
             { command: 'start', description: '🏠 Главное меню' },
+            { command: 'help', description: '❓ Помощь' },
             { command: 'donate', description: '💝 Донатная' },
             { command: 'contact', description: '✍️ Написать администратору' },
             { command: 'admin', description: '🛠 Панель администратора' },
@@ -211,7 +213,18 @@ class BotController {
           break;
 
         case 'contact':
-          await this.telegramApi.sendMessage(chatId, '✍️ Напишите ваше сообщение, и я передам его администратору.');
+          if (!this.config.TELEGRAM_ADMIN_ID) {
+            await this.telegramApi.sendMessage(chatId, '❌ Администратор не настроен.');
+            break;
+          }
+          this.pendingUserMessages.set(userId, true);
+          await this.telegramApi.sendMessage(chatId, '✍️ Напишите ваше сообщение, и я передам его администратору.', {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '❌ Отмена', callback_data: 'cancel_contact' }
+              ]]
+            }
+          });
           break;
           
         case 'balance':
@@ -518,6 +531,13 @@ class BotController {
       }
 
       // Обработка кнопки "Написать администратору"
+      if (callbackData === 'cancel_contact') {
+        this.pendingUserMessages.delete(userId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Отменено' });
+        await this.telegramApi.sendMessage(chatId, '❌ Отправка сообщения отменена.');
+        return;
+      }
+
       if (callbackData === 'contact_admin') {
         if (!this.config.TELEGRAM_ADMIN_ID) {
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Администратор не настроен' });
