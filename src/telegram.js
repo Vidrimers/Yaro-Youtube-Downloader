@@ -305,8 +305,9 @@ class TelegramHelper {
     const message = `📖 <b>Справка</b>\n\n` +
                    `<b>Поддерживаемые форматы ссылок:</b>\n` +
                    `YouTube:\n` +
-                   `• https://www.youtube.com/watch?v=VIDEO_ID\n` +
-                   `• https://youtu.be/VIDEO_ID\n\n` +
+                   `• https://www.youtube.com/shorts=videoID\n` +
+                   `• https://www.youtube.com/watch?v=videoID\n` +
+                   `• https://youtu.be/videoID\n\n` +
                    `⚠️ <b>Instagram</b> — в разработке, скоро будет доступен.\n\n` +
                    `<b>Доступные качества:</b>\n` +
                    `• 1080p (Full HD)\n` +
