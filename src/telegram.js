@@ -261,6 +261,14 @@ class TelegramHelper {
    * @returns {Promise<void>}
    */
   async sendWelcome(chatId) {
+    // Убираем ReplyKeyboard если она была установлена ранее
+    const removeMsg = await this.bot.sendMessage(chatId, '​', {
+      reply_markup: { remove_keyboard: true }
+    }).catch(() => null);
+    if (removeMsg) {
+      await this.bot.deleteMessage(chatId, removeMsg.message_id).catch(() => {});
+    }
+
     const message = `👋 <b>Добро пожаловать!</b>\n\n` +
                    `Я помогу вам скачать YouTube видео с возможностью удаления рекламы.\n\n` +
                    `<b>Как использовать:</b>\n` +
