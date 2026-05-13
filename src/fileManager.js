@@ -238,7 +238,7 @@ class FileManager {
       // Нарезаем каждую часть отдельным ffmpeg -c copy
       for (let i = 0; i < keepParts.length; i++) {
         const part = keepParts[i];
-        const partPath = path.join(
+        const partPath = path.resolve(
           path.dirname(outputPath),
           '_part_' + i + '_' + path.basename(outputPath)
         );
@@ -247,7 +247,7 @@ class FileManager {
       }
 
       // Создаём concat list файл
-      const concatListPath = path.join(
+      const concatListPath = path.resolve(
         path.dirname(outputPath),
         '_concat_' + Date.now() + '.txt'
       );
