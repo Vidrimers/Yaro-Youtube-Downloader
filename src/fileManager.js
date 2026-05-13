@@ -200,119 +200,138 @@ class FileManager {
   }
 
   /**
-   * Вырезает сегменты из видео (удаляет рекламные блоки)
-   * @param {string} inputPath - путь к исходному видео
-   * @param {string} outputPath - путь для сохранения результата
-   * @param {Array} segments - массив сегментов для удаления [{start, end}, ...]
-   * @returns {Promise<string>} - путь к обработанному файлу
+   * Вырезает сегменты из видео (удаляет рекламные блоки).
+   * Использует stream copy — без перекодирования, быстро и не жрёт память.
+   * Небольшая неточность на стыках (+-1 сек) допустима для удаления рекламы.
    */
   async removeSegments(inputPath, outputPath, segments) {
-    return new Promise((resolve, reject) => {
-      if (!segments || segments.length === 0) {
-        reject(new Error('NO_SEGMENTS_PROVIDED'));
-        return;
+    if (!segments || segments.length === 0) {
+      throw new Error('NO_SEGMENTS_PROVIDED');
+    }
+
+    Logger.info('Removing segments from video (stream copy)', {
+      inputPath,
+      segmentsCount: segments.length
+    });
+
+    const sortedSegments = segments
+      .map(s => ({ start: s.segment[0], end: s.segment[1] }))
+      .sort((a, b) => a.start - b.start);
+
+    const keepParts = [];
+    let lastEnd = 0;
+
+    sortedSegments.forEach(segment => {
+      if (segment.start > lastEnd) {
+        keepParts.push({ start: lastEnd, end: segment.start });
+      }
+      lastEnd = segment.end;
+    });
+    keepParts.push({ start: lastEnd, end: null }); // null = до конца файла
+
+    Logger.info('Video parts to keep', { partsCount: keepParts.length });
+
+    const fsSync = require('fs');
+    const partPaths = [];
+
+    try {
+      // Нарезаем каждую часть отдельным ffmpeg -c copy
+      for (let i = 0; i < keepParts.length; i++) {
+        const part = keepParts[i];
+        const partPath = path.join(
+          path.dirname(outputPath),
+          '_part_' + i + '_' + path.basename(outputPath)
+        );
+        partPaths.push(partPath);
+        await this._ffmpegCopyPart(inputPath, partPath, part.start, part.end);
       }
 
-      Logger.info('Removing segments from video', { 
-        inputPath, 
-        segmentsCount: segments.length 
-      });
+      // Создаём concat list файл
+      const concatListPath = path.join(
+        path.dirname(outputPath),
+        '_concat_' + Date.now() + '.txt'
+      );
+      const concatContent = partPaths.map(p => `file ${JSON.stringify(p)}`).join(String.fromCharCode(10));
+      fsSync.writeFileSync(concatListPath, concatContent, 'utf8');
 
-      // Сортируем сегменты по времени начала
-      const sortedSegments = segments
-        .map(s => ({ start: s.segment[0], end: s.segment[1] }))
-        .sort((a, b) => a.start - b.start);
+      // Склеиваем части через concat demuxer
+      await this._ffmpegConcat(concatListPath, outputPath);
 
-      // Создаем список частей видео, которые нужно оставить
-      const keepParts = [];
-      let lastEnd = 0;
+      // Удаляем временные файлы
+      try { fsSync.unlinkSync(concatListPath); } catch {}
+      for (const p of partPaths) {
+        try { fsSync.unlinkSync(p); } catch {}
+      }
 
-      sortedSegments.forEach(segment => {
-        // Добавляем часть до текущего сегмента
-        if (segment.start > lastEnd) {
-          keepParts.push({ start: lastEnd, end: segment.start });
-        }
-        lastEnd = segment.end;
-      });
+      Logger.info('Segments removed successfully', { outputPath });
+      return outputPath;
 
-      // Добавляем последнюю часть (от последнего сегмента до конца)
-      // Используем большое число как "конец видео"
-      keepParts.push({ start: lastEnd, end: 999999 });
+    } catch (error) {
+      for (const p of partPaths) {
+        try { fsSync.unlinkSync(p); } catch {}
+      }
+      throw error;
+    }
+  }
 
-      Logger.info('Video parts to keep', { partsCount: keepParts.length });
+  /** Копирует часть видео без перекодирования */
+  _ffmpegCopyPart(inputPath, outputPath, start, end) {
+    return new Promise((resolve, reject) => {
+      const args = ['-ss', String(start), '-i', inputPath, '-c', 'copy'];
+      if (end !== null) {
+        args.push('-t', String(end - start));
+      }
+      args.push('-avoid_negative_ts', 'make_zero', '-y', outputPath);
 
-      // Создаем filter_complex для ffmpeg
-      let filterComplex = '';
-      let concatInputs = '';
-
-      keepParts.forEach((part, index) => {
-        const duration = part.end - part.start;
-        filterComplex += `[0:v]trim=start=${part.start}:duration=${duration},setpts=PTS-STARTPTS[v${index}];`;
-        filterComplex += `[0:a]atrim=start=${part.start}:duration=${duration},asetpts=PTS-STARTPTS[a${index}];`;
-        concatInputs += `[v${index}][a${index}]`;
-      });
-
-      filterComplex += `${concatInputs}concat=n=${keepParts.length}:v=1:a=1[outv][outa]`;
-
-      let timedOut = false;
-
-      // Запускаем ffmpeg с filter_complex
-      const ffmpeg = spawn('ffmpeg', [
-        '-i', inputPath,
-        '-filter_complex', filterComplex,
-        '-map', '[outv]',
-        '-map', '[outa]',
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-c:a', 'aac',
-        outputPath
-      ]);
-
+      const ffmpeg = require('child_process').spawn('ffmpeg', args);
       let stderr = '';
+      ffmpeg.stderr.on('data', d => { stderr += d.toString(); });
 
-      // Устанавливаем timeout (увеличенный, т.к. перекодирование медленнее)
       const timeoutId = setTimeout(() => {
-        timedOut = true;
-        ffmpeg.kill('SIGTERM');
-        
-        setTimeout(() => {
-          if (!ffmpeg.killed) {
-            ffmpeg.kill('SIGKILL');
-          }
-        }, 1000);
-        
+        ffmpeg.kill('SIGKILL');
         reject(new Error('REMOVE_SEGMENTS_TIMEOUT'));
-      }, this.mergeTimeout * 3); // Утроенный timeout для перекодирования
+      }, this.mergeTimeout);
 
-      // Собираем stderr для логирования
-      ffmpeg.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      // Обрабатываем завершение
-      ffmpeg.on('close', (code) => {
+      ffmpeg.on('close', code => {
         clearTimeout(timeoutId);
-        
-        if (timedOut) {
-          return;
-        }
-        
-        if (code === 0) {
-          Logger.info('Segments removed successfully', { outputPath });
-          resolve(outputPath);
-        } else {
-          Logger.error('ffmpeg remove segments failed', new Error(stderr), { code });
+        if (code === 0) resolve();
+        else {
+          Logger.error('ffmpeg copy part failed', new Error(stderr), { code });
           reject(new Error('REMOVE_SEGMENTS_FAILED'));
         }
       });
-
-      ffmpeg.on('error', (error) => {
-        clearTimeout(timeoutId);
-        Logger.error('ffmpeg process error during segment removal', error);
-        reject(error);
-      });
+      ffmpeg.on('error', err => { clearTimeout(timeoutId); reject(err); });
     });
   }
+
+  /** Склеивает части видео через concat demuxer (без перекодирования) */
+  _ffmpegConcat(concatListPath, outputPath) {
+    return new Promise((resolve, reject) => {
+      const ffmpeg = require('child_process').spawn('ffmpeg', [
+        '-f', 'concat', '-safe', '0', '-i', concatListPath,
+        '-c', 'copy', '-y', outputPath
+      ]);
+
+      let stderr = '';
+      ffmpeg.stderr.on('data', d => { stderr += d.toString(); });
+
+      const timeoutId = setTimeout(() => {
+        ffmpeg.kill('SIGKILL');
+        reject(new Error('REMOVE_SEGMENTS_TIMEOUT'));
+      }, this.mergeTimeout);
+
+      ffmpeg.on('close', code => {
+        clearTimeout(timeoutId);
+        if (code === 0) resolve();
+        else {
+          Logger.error('ffmpeg concat failed', new Error(stderr), { code });
+          reject(new Error('REMOVE_SEGMENTS_FAILED'));
+        }
+      });
+      ffmpeg.on('error', err => { clearTimeout(timeoutId); reject(err); });
+    });
+  }
+
 }
 
 module.exports = FileManager;
