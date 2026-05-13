@@ -251,7 +251,7 @@ class FileManager {
         path.dirname(outputPath),
         '_concat_' + Date.now() + '.txt'
       );
-      const concatContent = partPaths.map(p => `file ${JSON.stringify(p)}`).join(String.fromCharCode(10));
+      const concatContent = partPaths.map(p => `file ${p}`).join(String.fromCharCode(10));
       fsSync.writeFileSync(concatListPath, concatContent, 'utf8');
 
       // Склеиваем части через concat demuxer
