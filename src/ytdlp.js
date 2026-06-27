@@ -220,6 +220,14 @@ class VideoProcessor {
       await this.executeYtDlp(args, timeout);
       return outputPath;
     } catch (error) {
+      const { Logger } = require('./utils');
+      Logger.error('downloadVideo failed', error, { 
+        stderr: error.stderr || 'no stderr',
+        message: error.message,
+        formatId,
+        url
+      });
+      
       if (error.message === 'TIMEOUT') {
         throw new Error('TIMEOUT');
       }
