@@ -382,6 +382,14 @@ class BotController {
             await this.handleBalanceCommand(chatId);
           } else {
             Logger.info(`Unauthorized balance command attempt`, { userId, username });
+            if (this.config.TELEGRAM_ADMIN_ID) {
+              await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+                `⚠️ <b>Попытка доступа к балансам</b>\n\n` +
+                `👤 @${username} (ID: <code>${userId}</code>)\n` +
+                `📝 Команда: /balance`,
+                { parse_mode: 'HTML' }
+              );
+            }
           }
           break;
 
@@ -391,6 +399,14 @@ class BotController {
             await this.handleAdminMenu(chatId);
           } else {
             Logger.info(`Unauthorized admin command attempt`, { userId, username });
+            if (this.config.TELEGRAM_ADMIN_ID) {
+              await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+                `⚠️ <b>Попытка доступа к админ-панели</b>\n\n` +
+                `👤 @${username} (ID: <code>${userId}</code>)\n` +
+                `📝 Команда: /admin`,
+                { parse_mode: 'HTML' }
+              );
+            }
           }
           break;
           
