@@ -67,8 +67,9 @@ class BotController {
     this.usernames = new Map();
 
     // Трекер попыток доступа к админ-командам
-    // Map<userId, { count: number, firstAttempt: timestamp }>
+    // Map<userId, { count: number, firstAttempt: number, banCount: number }>
     this.adminAccessAttempts = new Map();
+    this.adminAttemptsFile = path.resolve('admin_attempts.json');
 
     // Map<adminId, { targetUserId, duration }> — ожидание причины бана от админа
     this.pendingBanReasons = new Map();
@@ -101,6 +102,9 @@ class BotController {
 
     // Загружаем баны
     await this.banManager.load();
+    
+    // Загружаем счётчик попыток доступа к админ-командам
+    await this.loadAdminAttempts();
     
     // Запускаем файловый сервер
     try {
@@ -2312,6 +2316,7 @@ class BotController {
     if (!attempt || (now - attempt.firstAttempt) > WINDOW_MS) {
       // Новый цикл попыток
       this.adminAccessAttempts.set(userId, { count: 1, firstAttempt: now });
+      await this.saveAdminAttempts();
       return;
     }
 
@@ -2327,6 +2332,7 @@ class BotController {
 
       await this.banManager.ban(userId, username, duration, `Авто-бан: ${attempt.count} попыток доступа к ${command}`);
       this.adminAccessAttempts.set(userId, { count: 0, firstAttempt: now, banCount: banHistory + 1 });
+      await this.saveAdminAttempts();
 
       const isLastBan = duration === 'forever';
       const nextBanText = isLastBan
@@ -2352,11 +2358,45 @@ class BotController {
 
       Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: attempt.count, duration, banCount: banHistory + 1, command });
     } else {
+      await this.saveAdminAttempts();
       const remaining = MAX_ATTEMPTS - attempt.count;
       await this.telegramApi.sendMessage(chatId,
         `⚠️ <b>Осталось попыток: ${remaining}</b>\n\n` +
         'После этого вы будете заблокированы.'
       , { parse_mode: 'HTML' });
+    }
+  }
+
+  /**
+   * Загружает счётчик попыток из файла
+   */
+  async loadAdminAttempts() {
+    try {
+      const fs = require('fs').promises;
+      const data = await fs.readFile(this.adminAttemptsFile, 'utf8');
+      const json = JSON.parse(data);
+      this.adminAccessAttempts = new Map(
+        Object.entries(json).map(([id, info]) => [parseInt(id), info])
+      );
+      Logger.info('Admin access attempts loaded', { count: this.adminAccessAttempts.size });
+    } catch {
+      this.adminAccessAttempts = new Map();
+    }
+  }
+
+  /**
+   * Сохраняет счётчик попыток в файл
+   */
+  async saveAdminAttempts() {
+    try {
+      const fs = require('fs').promises;
+      const obj = {};
+      for (const [userId, info] of this.adminAccessAttempts) {
+        obj[userId] = info;
+      }
+      await fs.writeFile(this.adminAttemptsFile, JSON.stringify(obj, null, 2), 'utf8');
+    } catch (error) {
+      Logger.warn('Failed to save admin access attempts', { error: error.message });
     }
   }
 
