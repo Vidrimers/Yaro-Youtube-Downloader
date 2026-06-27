@@ -295,8 +295,8 @@ class ExtensionAPI {
       if (!this.jokeManager || !this.jokeManager.jokes || this.jokeManager.jokes.length === 0) {
         return res.json({ joke: null });
       }
-      const joke = this.jokeManager.getRandomJoke();
-      res.json({ joke: joke ? joke.text : null });
+      const jokeText = this.jokeManager.getRandomJoke();
+      res.json({ joke: jokeText });
     } catch (e) {
       res.json({ joke: null });
     }
