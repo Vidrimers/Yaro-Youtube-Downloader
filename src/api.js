@@ -148,6 +148,17 @@ class ExtensionAPI {
         return res.status(400).json({ error: 'No suitable format found' });
       }
 
+      // Prefer combined formats to avoid 403 on video-only streams
+      if (!this.videoProcessor.isCombinedFormat(format)) {
+        const h = format.height || parseInt(quality) || 0;
+        const combined = videoInfo.formats.find(f =>
+          this.videoProcessor.isCombinedFormat(f) && f.height === h
+        );
+        if (combined) {
+          format = combined;
+        }
+      }
+
       const videoId = videoInfo.id || 'video';
       const videoPath = this.fileManager.generateFilePath(videoId, 'video.mp4');
       const audioPath = this.fileManager.generateFilePath(videoId, 'audio.m4a');
@@ -175,7 +186,20 @@ class ExtensionAPI {
       const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
 
       if (isCombined) {
-        await this.videoProcessor.downloadVideo(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
+        try {
+          await this.videoProcessor.downloadVideo(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
+        } catch (dlError) {
+          Logger.warn('Combined format download failed, trying separate streams', { error: dlError.message });
+          // Fallback: download video+audio separately and merge
+          const audioFormat = this.videoProcessor.getBestAudioFormat(videoInfo.formats);
+          if (audioFormat) {
+            await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
+            await this.videoProcessor.downloadStream(normalizedUrl, audioFormat.format_id, audioPath, 300000, cookiesFile);
+            await this.fileManager.mergeVideoAudio(videoPath, audioPath, mergedPath);
+          } else {
+            throw dlError;
+          }
+        }
       } else {
         await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
 
