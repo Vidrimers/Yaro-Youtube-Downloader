@@ -7,6 +7,7 @@ const TelegramApiWrapper = require('./src/telegramWrapper');
 const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
 const SponsorBlock = require('./src/sponsorblock');
+const ExtensionAPI = require('./src/api');
 const CryptoApiClient = require('./src/cryptoApi');
 const JokeManager = require('./src/jokeManager');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
@@ -113,6 +114,17 @@ class BotController {
       Logger.error('Failed to start file server', error);
       throw error;
     }
+    
+    // Инициализируем REST API для Chrome расширения
+    this.extensionAPI = new ExtensionAPI(this.fileServer.app, {
+      videoProcessor: this.videoProcessor,
+      fileManager: this.fileManager,
+      fileServer: this.fileServer,
+      sponsorBlock: this.sponsorBlock,
+      config: this.config,
+      apiKey: this.config.API_SECRET_KEY
+    });
+    Logger.info('Extension API initialized');
     
     // Проверяем доступность ffmpeg
     const ffmpegAvailable = await this.fileManager.checkFfmpegAvailable();
