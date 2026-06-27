@@ -116,6 +116,9 @@ class BotController {
     
     // Запускаем периодическую очистку старых файлов
     this.startCleanupInterval();
+
+    // Запускаем проверку cookies YouTube
+    this.startCookiesHealthCheck();
     
     // Обработчик команд
     this.bot.onText(/^\/(.+)$/, (msg, match) => {
@@ -188,6 +191,72 @@ class BotController {
       interval: this.config.CLEANUP_INTERVAL,
       maxAge: this.config.FILE_MAX_AGE
     });
+  }
+
+  /**
+   * Периодическая проверка доступности скачивания YouTube видео
+   * Если cookies протухли — уведомляет админа
+   */
+  startCookiesHealthCheck() {
+    const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+    const TEST_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    this.cookiesAlertSent = false;
+
+    const check = async () => {
+      if (!this.config.TELEGRAM_ADMIN_ID) return;
+
+      try {
+        const { spawn } = require('child_process');
+        const result = await new Promise((resolve) => {
+          const proc = spawn('yt-dlp', ['-f', '18', '-o', '/dev/null', '--no-warnings', TEST_URL]);
+          let stderr = '';
+          proc.stderr.on('data', (d) => { stderr += d.toString(); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve({ ok: false, reason: 'timeout' }); }, 60000);
+          proc.on('close', (code) => {
+            clearTimeout(timeout);
+            resolve({ ok: code === 0, reason: stderr });
+          });
+          proc.on('error', (err) => {
+            clearTimeout(timeout);
+            resolve({ ok: false, reason: err.message });
+          });
+        });
+
+        if (result.ok) {
+          if (this.cookiesAlertSent) {
+            this.cookiesAlertSent = false;
+            Logger.info('YouTube cookies recovered');
+          }
+          Logger.info('YouTube cookies health check passed');
+        } else {
+          Logger.warn('YouTube cookies health check failed', { reason: result.reason });
+
+          if (!this.cookiesAlertSent) {
+            this.cookiesAlertSent = true;
+            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+              '🍪 <b>YouTube cookies протухли!</b>\n\n' +
+              'Скачивание видео не работает (403 Forbidden).\n\n' +
+              '<b>Как обновить:</b>\n' +
+              '1. Открой YouTube в Chrome, залогинься\n' +
+              '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
+              '3. Нажми на иконку расширения → <b>Export</b>\n' +
+              '4. Загрузи файл на сервер:\n' +
+              '<code>scp cookies.txt prod:/home/ytdownload/cookies.txt</code>\n' +
+              '5. Перезапусти бота:\n' +
+              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
+              '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
+              { parse_mode: 'HTML', disable_web_page_preview: true }
+            );
+          }
+        }
+      } catch (error) {
+        Logger.error('Cookies health check error', error);
+      }
+    };
+
+    setTimeout(check, 60 * 1000);
+    setInterval(check, CHECK_INTERVAL);
+    Logger.info('Cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
   }
 
   /**
