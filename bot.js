@@ -1746,16 +1746,28 @@ class BotController {
 
     try {
       // Парсим trim_video_{formatId}_{videoId}_{quality}
-      const parts = callbackData.split('_');
-      if (parts.length < 5) {
-        throw new Error('Invalid trim callback format');
-      }
-
-      const formatId = parts[2];
-      const videoId = parts[3];
-      const quality = parts[4];
+      // formatId — число, quality заканчивается на 'p', videoId — всё между ними
+      const withoutPrefix = callbackData.substring('trim_video_'.length);
+      const firstUnderscore = withoutPrefix.indexOf('_');
+      const formatId = withoutPrefix.substring(0, firstUnderscore);
+      const remaining = withoutPrefix.substring(firstUnderscore + 1);
+      const lastUnderscore = remaining.lastIndexOf('_');
+      const videoId = remaining.substring(0, lastUnderscore);
+      const quality = remaining.substring(lastUnderscore + 1);
 
       Logger.info('Starting trim flow', { userId, formatId, videoId, quality });
+
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+      // Получаем videoInfo и format заранее, чтобы не перезапрашивать
+      const videoInfo = await this.videoProcessor.getVideoInfo(url);
+      const format = this.findFormatWithFallback(videoInfo.formats, formatId, quality, videoId, userId);
+
+      if (!format) {
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Формат недоступен' });
+        await this.telegramHelper.sendError(chatId, 'format_unavailable');
+        return;
+      }
 
       // Сохраняем состояние обрезки
       this.pendingTrims.set(userId, {
@@ -1765,7 +1777,9 @@ class BotController {
         step: 'start',
         startTime: null,
         endTime: null,
-        url: `https://www.youtube.com/watch?v=${videoId}`
+        url,
+        videoInfo,
+        format
       });
 
       await this.telegramApi.answerCallbackQuery(query.id, { text: 'Выберите время начала' });
@@ -1842,10 +1856,9 @@ class BotController {
 
       await this.telegramApi.sendChatAction(chatId, 'typing');
 
-      const videoInfo = await this.videoProcessor.getVideoInfo(trimState.url);
-      const format = this.findFormatWithFallback(videoInfo.formats, trimState.formatId, trimState.quality, trimState.videoId, userId);
+      const { videoInfo, format } = trimState;
 
-      if (!format) {
+      if (!videoInfo || !format) {
         await this.telegramHelper.sendError(chatId, 'format_unavailable');
         return;
       }
@@ -1856,7 +1869,10 @@ class BotController {
         trimState.startTime, trimState.endTime
       );
     } catch (error) {
-      Logger.error('Error in trim download', error, { userId });
+      Logger.error('Error in trim download', error, { userId, stderr: error.stderr || 'no stderr' });
+      if (error.stderr) {
+        Logger.error('yt-dlp stderr', new Error(error.stderr), { userId });
+      }
       await this.telegramHelper.sendError(chatId, 'unknown');
     }
   }

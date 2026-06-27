@@ -117,7 +117,10 @@ class VideoProcessor {
         }
       }
       
-      throw new Error('UNKNOWN_ERROR');
+      const detailedError = new Error('UNKNOWN_ERROR');
+      detailedError.stderr = error.stderr;
+      detailedError.originalError = error;
+      throw detailedError;
     }
   }
 
