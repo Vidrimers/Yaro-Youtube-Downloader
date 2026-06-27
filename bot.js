@@ -2331,7 +2331,7 @@ class BotController {
       const isLastBan = duration === 'forever';
       const nextBanText = isLastBan
         ? ''
-        : `\n\n⚠️ Следующий бан — ${BAN_ESCALATION[Math.min(durationIndex + 1, BAN_ESCALATION.length - 1)] === 'forever' ? 'навсегда' : BAN_LABELS[BAN_ESCALATION[Math.min(durationIndex + 1, BAN_ESCALATION.length - 1)]]}.`;
+        : '\n\n⚠️ Следующий бан будет дольше ;-)';
 
       await this.telegramApi.sendMessage(chatId,
         `🚫 <b>Вы заблокированы на ${label}.</b>\n\n` +
