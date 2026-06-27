@@ -268,7 +268,7 @@ class BotController {
    */
   startInstagramCookiesHealthCheck() {
     const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
-    const TEST_URL = 'https://www.instagram.com/p/C0DdHiOrqO_/';
+    const TEST_URL = 'https://www.instagram.com/reel/DU4hf2mjLFI/';
     this.instagramCookiesAlertSent = false;
 
     const check = async () => {
