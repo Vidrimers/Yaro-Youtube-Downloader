@@ -142,7 +142,8 @@ class BotController {
       sponsorBlock: this.sponsorBlock,
       config: this.config,
       apiKey: this.config.API_SECRET_KEY,
-      statsManager: this.statsManager
+      statsManager: this.statsManager,
+      jokeManager: this.jokeManager
     });
     Logger.info('Extension API initialized');
     

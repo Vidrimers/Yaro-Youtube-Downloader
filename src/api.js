@@ -15,6 +15,7 @@ class ExtensionAPI {
     this.config = options.config;
     this.apiKey = options.apiKey;
     this.statsManager = options.statsManager;
+    this.jokeManager = options.jokeManager;
 
     this.setupRoutes();
   }
@@ -38,6 +39,7 @@ class ExtensionAPI {
     this.app.post('/api/info', (req, res) => this.handleInfo(req, res));
     this.app.post('/api/download', (req, res) => this.handleDownload(req, res));
     this.app.post('/api/download/instagram', (req, res) => this.handleInstagramDownload(req, res));
+    this.app.get('/api/joke', (req, res) => this.handleJoke(req, res));
   }
 
   parseBody(req) {
@@ -286,6 +288,18 @@ class ExtensionAPI {
         }
       }
     }, 60000);
+  }
+
+  handleJoke(req, res) {
+    try {
+      if (!this.jokeManager || !this.jokeManager.jokes || this.jokeManager.jokes.length === 0) {
+        return res.json({ joke: null });
+      }
+      const joke = this.jokeManager.getRandomJoke();
+      res.json({ joke: joke ? joke.text : null });
+    } catch (e) {
+      res.json({ joke: null });
+    }
   }
 }
 
