@@ -14,6 +14,7 @@ class ExtensionAPI {
     this.sponsorBlock = options.sponsorBlock;
     this.config = options.config;
     this.apiKey = options.apiKey;
+    this.statsManager = options.statsManager;
 
     this.setupRoutes();
   }
@@ -198,6 +199,20 @@ class ExtensionAPI {
       const title = (videoInfo.title || 'video').replace(/[<>:"/\\|?*]/g, '').substring(0, 100);
       const tempLink = await this.fileServer.createTemporaryLink(finalFile, `${title}.mp4`);
 
+      if (this.statsManager) {
+        this.statsManager.recordDownload({
+          source: 'extension',
+          platform: 'youtube',
+          videoId: videoId,
+          title: videoInfo.title,
+          quality: quality || selectedFormat?.quality || null,
+          removeAds: !!removeAds,
+          trimmed: trimStart !== undefined || trimEnd !== undefined,
+          userId: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
+          extensionVersion: req.headers['x-extension-version'] || null
+        });
+      }
+
       this.cleanupTempFiles([videoPath, audioPath, mergedPath, outputPath, finalFile === sourceFile ? null : finalFile].filter(Boolean), finalFile);
 
       res.json({
@@ -226,6 +241,18 @@ class ExtensionAPI {
       const cookiesFile = this.config.INSTAGRAM_COOKIES_FILE || undefined;
 
       await this.videoProcessor.downloadInstagram(url, outputPath, 300000, cookiesFile);
+
+      if (this.statsManager) {
+        this.statsManager.recordDownload({
+          source: 'extension',
+          platform: 'instagram',
+          videoId: null,
+          title: 'Instagram video',
+          quality: null,
+          userId: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
+          extensionVersion: req.headers['x-extension-version'] || null
+        });
+      }
 
       const tempLink = await this.fileServer.createTemporaryLink(outputPath, 'instagram_video.mp4');
 

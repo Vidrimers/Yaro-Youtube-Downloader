@@ -8,6 +8,7 @@ const FileManager = require('./src/fileManager');
 const FileServer = require('./src/fileServer');
 const SponsorBlock = require('./src/sponsorblock');
 const ExtensionAPI = require('./src/api');
+const StatsManager = require('./src/stats');
 const CryptoApiClient = require('./src/cryptoApi');
 const JokeManager = require('./src/jokeManager');
 const { URLValidator, RateLimiter, Logger } = require('./src/utils');
@@ -64,6 +65,9 @@ class BotController {
     // Менеджер банов
     this.banManager = new BanManager();
 
+    // Статистика
+    this.statsManager = new StatsManager();
+
     // Кэш username пользователей для системы банов
     this.usernames = new Map();
 
@@ -104,6 +108,9 @@ class BotController {
     // Загружаем баны
     await this.banManager.load();
     
+    // Инициализируем статистику
+    await this.statsManager.initialize();
+    
     // Загружаем счётчик попыток доступа к админ-командам
     await this.loadAdminAttempts();
     
@@ -122,7 +129,8 @@ class BotController {
       fileServer: this.fileServer,
       sponsorBlock: this.sponsorBlock,
       config: this.config,
-      apiKey: this.config.API_SECRET_KEY
+      apiKey: this.config.API_SECRET_KEY,
+      statsManager: this.statsManager
     });
     Logger.info('Extension API initialized');
     
@@ -600,6 +608,16 @@ class BotController {
       
       // Instagram — прямое скачивание без выбора качества
       if (URLValidator.isInstagramUrl(normalizedUrl)) {
+        this.statsManager.recordDownload({
+          source: 'bot',
+          platform: 'instagram',
+          videoId: null,
+          title: 'Instagram video',
+          quality: null,
+          removeAds: false,
+          trimmed: false,
+          userId: String(userId)
+        });
         await this.processInstagramDownload(chatId, userId, normalizedUrl, username);
         return;
       }
@@ -884,6 +902,19 @@ class BotController {
         return;
       }
 
+      // Статистика
+      if (callbackData === 'admin_stats') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Загружаю...' });
+          const stats = this.statsManager.getStats();
+          const text = this.statsManager.formatStatsText(stats);
+          await this.telegramApi.sendMessage(chatId, text, { parse_mode: 'HTML' });
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
       // Проверка занятого места
       if (callbackData === 'admin_disk_info') {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
@@ -1033,6 +1064,18 @@ class BotController {
       // Нет спонсорских блоков, скачиваем как обычно
       // Проверяем, является ли формат комбинированным
       const isCombined = this.videoProcessor.isCombinedFormat(format);
+      
+      // Записываем статистику
+      this.statsManager.recordDownload({
+        source: 'bot',
+        platform: 'youtube',
+        videoId: videoId,
+        title: videoInfo.title,
+        quality: quality,
+        removeAds: false,
+        trimmed: false,
+        userId: String(userId)
+      });
       
       // Проверяем, нужно ли объединять видео и аудио
       if (!isCombined) {
@@ -2013,9 +2056,11 @@ class BotController {
         
         if (filteredSegments.length === 0) {
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Нет сегментов для удаления, скачиваю как есть...' });
+          this.statsManager.recordDownload({ source: 'bot', platform: 'youtube', videoId, title: videoInfo.title, quality, userId: String(userId) });
           await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
         } else {
           await this.telegramApi.answerCallbackQuery(query.id, { text: `Убираю ${group.name.toLowerCase()} и скачиваю...` });
+          this.statsManager.recordDownload({ source: 'bot', platform: 'youtube', videoId, title: videoInfo.title, quality, removeAds: true, userId: String(userId) });
           await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, true, filteredSegments);
         }
         
@@ -2249,6 +2294,17 @@ class BotController {
         return;
       }
 
+      this.statsManager.recordDownload({
+        source: 'bot',
+        platform: 'youtube',
+        videoId: videoInfo.id,
+        title: videoInfo.title,
+        quality: trimState.quality,
+        removeAds: false,
+        trimmed: true,
+        userId: String(userId)
+      });
+
       await this.processVideoDownload(
         chatId, userId, trimState.url, videoInfo, format, trimState.quality,
         false, null,
@@ -2457,6 +2513,9 @@ class BotController {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
+            [
+              { text: '📊 Статистика', callback_data: 'admin_stats' }
+            ],
             [
               { text: '💾 Проверить место', callback_data: 'admin_disk_info' },
               { text: '🗑 Очистить видео', callback_data: 'admin_clear_videos' }
