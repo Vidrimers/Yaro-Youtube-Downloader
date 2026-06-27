@@ -369,6 +369,12 @@ class TelegramHelper {
       }]);
     }
 
+    // Ссылка на страницу донатов
+    keyboard.inline_keyboard.push([{
+      text: '🌐 Все способы',
+      url: 'https://vidrimers.site/donate'
+    }]);
+
     // Криптовалютные кнопки
     const cryptoButtons = [];
     
