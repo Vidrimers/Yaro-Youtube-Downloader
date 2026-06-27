@@ -168,7 +168,8 @@ class VideoProcessor {
       }
       
       // Проверяем что ссылка не на m3u8 плейлист
-      if (directUrl.includes('.m3u8') || directUrl.includes('mime=video%2Fmp4')) {
+      const urlPath = new URL(directUrl).pathname;
+      if (urlPath.endsWith('.m3u8') || urlPath.includes('.m3u8/')) {
         throw new Error('FORMAT_UNAVAILABLE');
       }
       
