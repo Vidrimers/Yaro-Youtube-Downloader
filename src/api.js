@@ -210,7 +210,7 @@ class ExtensionAPI {
           platform: 'youtube',
           videoId: videoId,
           title: videoInfo.title,
-          quality: quality || selectedFormat?.quality || null,
+          quality: quality || format?.format_note || `${format?.height}p` || null,
           removeAds: !!removeAds,
           trimmed: trimStart !== undefined || trimEnd !== undefined,
           userId: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
