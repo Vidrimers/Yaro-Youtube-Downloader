@@ -167,6 +167,11 @@ class VideoProcessor {
         throw new Error('FORMAT_UNAVAILABLE');
       }
       
+      // Проверяем что ссылка не на m3u8 плейлист
+      if (directUrl.includes('.m3u8') || directUrl.includes('mime=video%2Fmp4')) {
+        throw new Error('FORMAT_UNAVAILABLE');
+      }
+      
       return directUrl;
     } catch (error) {
       if (error.message === 'TIMEOUT') {
@@ -388,13 +393,18 @@ class VideoProcessor {
     // Популярные разрешения
     const POPULAR_RESOLUTIONS = ['1080p', '720p', '480p', '360p', '240p'];
     
+    // Исключаем HLS/m3u8 форматы — они не дают прямую ссылку на MP4
+    const nonHlsFormats = formats.filter(f => 
+      f.protocol !== 'm3u8' && f.protocol !== 'm3u8_native'
+    );
+    
     // Шаг 1: Разделяем форматы на комбинированные и только видео
-    const combinedFormats = formats.filter(f => 
+    const combinedFormats = nonHlsFormats.filter(f => 
       f.vcodec && f.vcodec !== 'none' && 
       f.acodec && f.acodec !== 'none'
     );
     
-    const videoOnlyFormats = formats.filter(f =>
+    const videoOnlyFormats = nonHlsFormats.filter(f =>
       f.vcodec && f.vcodec !== 'none' &&
       (!f.acodec || f.acodec === 'none')
     );
