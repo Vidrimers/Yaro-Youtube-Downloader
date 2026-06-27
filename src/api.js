@@ -112,7 +112,7 @@ class ExtensionAPI {
   async handleDownload(req, res) {
     try {
       const body = await this.parseBody(req);
-      const { url, formatId, quality, removeAds, trimStart, trimEnd } = body;
+      const { url, formatId, quality, removeAds, sponsorCategories, trimStart, trimEnd } = body;
 
       if (!url) return res.status(400).json({ error: 'url is required' });
 
@@ -153,11 +153,16 @@ class ExtensionAPI {
       const outputPath = this.fileManager.generateFilePath(videoId, 'final.mp4');
 
       let sponsorSegments = null;
-      if (removeAds && this.config.SPONSORBLOCK_ENABLED && videoId) {
+      const shouldRemoveSponsor = removeAds || (sponsorCategories && sponsorCategories.length > 0);
+      if (shouldRemoveSponsor && this.config.SPONSORBLOCK_ENABLED && videoId) {
         try {
           const segments = await this.sponsorBlock.getSegments(videoId);
           if (segments && segments.length > 0) {
-            sponsorSegments = segments;
+            if (sponsorCategories && sponsorCategories.length > 0) {
+              sponsorSegments = this.sponsorBlock.filterSegmentsByCategories(segments, sponsorCategories);
+            } else {
+              sponsorSegments = segments;
+            }
           }
         } catch (e) {
           Logger.warn('SponsorBlock failed', { error: e.message });
