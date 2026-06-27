@@ -24,7 +24,7 @@
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "fluent-ffmpeg": "^2.1.2",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.67.0"
   },
   "devDependencies": {
     "fast-check": "^3.15.0",
