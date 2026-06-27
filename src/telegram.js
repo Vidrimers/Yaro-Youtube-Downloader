@@ -438,6 +438,50 @@ class TelegramHelper {
   }
 
   /**
+   * Отправляет приглашение ввести время начала обрезки
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendTrimStartPrompt(chatId) {
+    await this.bot.sendMessage(chatId,
+      '✂️ <b>Выберите время начала:</b>\n\n' +
+      'Введите время в формате <code>ЧЧ:ММ:СС</code>\n' +
+      'Например: <code>00:01:30</code> — начать с 1 минуты 30 секунд',
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '▶️ С самого начала', callback_data: 'trim_start_beginning' }
+          ]]
+        }
+      }
+    );
+  }
+
+  /**
+   * Отправляет приглашение ввести время конца обрезки
+   * @param {number} chatId - ID чата
+   * @param {string} startTimeStr - выбранное время начала (для отображения)
+   * @returns {Promise<void>}
+   */
+  async sendTrimEndPrompt(chatId, startTimeStr) {
+    await this.bot.sendMessage(chatId,
+      '✂️ <b>Выберите время конца:</b>\n\n' +
+      `Начало: <code>${startTimeStr}</code>\n\n` +
+      'Введите время в формате <code>ЧЧ:ММ:СС</code>\n' +
+      'Например: <code>00:05:00</code> — обрезать на 5 минуте',
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '⏭ До конца', callback_data: 'trim_end_end' }
+          ]]
+        }
+      }
+    );
+  }
+
+  /**
    * Отправляет адрес Kaspa кошелька
    * @param {number} chatId - ID чата
    * @returns {Promise<void>}
@@ -583,6 +627,12 @@ class TelegramHelper {
       }]);
     }
     
+    // Обрезать видео
+    keyboard.inline_keyboard.push([{
+      text: '✂️ Обрезать видео',
+      callback_data: `trim_video_${formatId}_${videoId}_${quality}`
+    }]);
+
     // Добавляем "Скачать как есть"
     keyboard.inline_keyboard.push([{
       text: '📥 Скачать как есть',

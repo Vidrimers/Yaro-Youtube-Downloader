@@ -56,6 +56,10 @@ class BotController {
     // Map<adminId, { targetUserId, userText }> — админ в режиме ответа пользователю
     this.pendingAdminReplies = new Map();
 
+    // Состояния обрезки видео
+    // Map<userId, { videoId, formatId, quality, step, startTime, endTime, url }>
+    this.pendingTrims = new Map();
+
     // Менеджер банов
     this.banManager = new BanManager();
 
@@ -315,6 +319,12 @@ class BotController {
         this.pendingBanReasons.delete(userId);
         await this._executeBan(chatId, targetUserId, targetUsername, duration, text);
         return;
+      }
+
+      // Если пользователь в режиме обрезки видео
+      if (this.pendingTrims.has(userId)) {
+        const handled = await this.handleTrimInput(msg);
+        if (handled) return;
       }
 
       // Проверка whitelist (если настроен)
@@ -687,6 +697,39 @@ class BotController {
         return;
       }
       
+      // Обработка кнопки "Обрезать видео"
+      if (callbackData.startsWith('trim_video_')) {
+        await this.handleTrimStart(query);
+        return;
+      }
+
+      // Обработка кнопки "С самого начала" при обрезке
+      if (callbackData === 'trim_start_beginning') {
+        const trimState = this.pendingTrims.get(userId);
+        if (!trimState || trimState.step !== 'start') {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
+          return;
+        }
+        trimState.startTime = 0;
+        trimState.step = 'end';
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Начало: с самого начала' });
+        await this.telegramHelper.sendTrimEndPrompt(chatId, '00:00:00');
+        return;
+      }
+
+      // Обработка кнопки "До конца" при обрезке
+      if (callbackData === 'trim_end_end') {
+        const trimState = this.pendingTrims.get(userId);
+        if (!trimState || trimState.step !== 'end') {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
+          return;
+        }
+        trimState.endTime = null;
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'До конца видео' });
+        await this.startTrimDownload(chatId, userId, trimState);
+        return;
+      }
+      
       // Парсим callback data для обычных команд
       const { Formatter } = require('./src/utils');
       const parsed = Formatter.parseCallbackData(callbackData);
@@ -845,7 +888,7 @@ class BotController {
    * @param {boolean} removeSponsorBlocks - удалять ли спонсорские блоки
    * @param {Array} sponsorSegments - массив сегментов для удаления (опционально)
    */
-  async processVideoDownload(chatId, userId, url, videoInfo, format, quality, removeSponsorBlocks = false, sponsorSegments = null) {
+  async processVideoDownload(chatId, userId, url, videoInfo, format, quality, removeSponsorBlocks = false, sponsorSegments = null, trimStart = null, trimEnd = null) {
     let statusMessage = null;
     let videoPath = null;
     let audioPath = null;
@@ -983,6 +1026,23 @@ class BotController {
         Logger.info('Sponsor segments removed', { userId });
       }
       
+      // Обрезка видео если запрошено
+      if (trimStart !== null || trimEnd !== null) {
+        Logger.info('Trimming video', { userId, trimStart, trimEnd });
+
+        await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'processing');
+
+        const trimmedPath = this.fileManager.generateFilePath(videoInfo.id, 'trimmed.mp4');
+
+        await this.fileManager.trimVideo(finalOutputPath, trimmedPath, trimStart || 0, trimEnd);
+
+        // Удаляем необрезанный файл
+        await this.fileManager.deleteFile(finalOutputPath);
+        finalOutputPath = trimmedPath;
+
+        Logger.info('Video trimmed successfully', { userId });
+      }
+
       // Проверяем размер файла и выбираем стратегию отправки
       const fileSize = await this.fileManager.getFileSize(finalOutputPath);
       Logger.info('File processed', { userId, fileSize, removedSponsors: removeSponsorBlocks });
@@ -1639,6 +1699,165 @@ class BotController {
       } catch (callbackError) {
         Logger.info('Failed to answer callback query', { userId });
       }
+    }
+  }
+
+  /**
+   * Парсит строку времени (ЧЧ:ММ:СС или ММ:СС) в секунды
+   * @param {string} timeStr - строка времени
+   * @returns {number|null} - секунды или null при ошибке
+   */
+  parseTimeToSeconds(timeStr) {
+    const parts = timeStr.split(':');
+    if (parts.length === 3) {
+      const [h, m, s] = parts.map(Number);
+      if (isNaN(h) || isNaN(m) || isNaN(s)) return null;
+      if (h < 0 || m < 0 || m >= 60 || s < 0 || s >= 60) return null;
+      return h * 3600 + m * 60 + s;
+    } else if (parts.length === 2) {
+      const [m, s] = parts.map(Number);
+      if (isNaN(m) || isNaN(s)) return null;
+      if (m < 0 || s < 0 || s >= 60) return null;
+      return m * 60 + s;
+    }
+    return null;
+  }
+
+  /**
+   * Форматирует секунды в строку ЧЧ:ММ:СС
+   * @param {number} seconds - секунды
+   * @returns {string} - отформатированное время
+   */
+  formatSecondsToTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  /**
+   * Обрабатывает начало обрезки видео (нажатие кнопки "Обрезать видео")
+   * @param {Object} query - callback query
+   */
+  async handleTrimStart(query) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const callbackData = query.data;
+
+    try {
+      // Парсим trim_video_{formatId}_{videoId}_{quality}
+      const parts = callbackData.split('_');
+      if (parts.length < 5) {
+        throw new Error('Invalid trim callback format');
+      }
+
+      const formatId = parts[2];
+      const videoId = parts[3];
+      const quality = parts[4];
+
+      Logger.info('Starting trim flow', { userId, formatId, videoId, quality });
+
+      // Сохраняем состояние обрезки
+      this.pendingTrims.set(userId, {
+        videoId,
+        formatId,
+        quality,
+        step: 'start',
+        startTime: null,
+        endTime: null,
+        url: `https://www.youtube.com/watch?v=${videoId}`
+      });
+
+      await this.telegramApi.answerCallbackQuery(query.id, { text: 'Выберите время начала' });
+      await this.telegramHelper.sendTrimStartPrompt(chatId);
+
+    } catch (error) {
+      Logger.error('Error starting trim flow', error, { userId });
+      await this.telegramApi.answerCallbackQuery(query.id, { text: 'Произошла ошибка' });
+    }
+  }
+
+  /**
+   * Обрабатывает ввод времени от пользователя в режиме обрезки
+   * @param {Object} msg - объект сообщения Telegram
+   * @returns {boolean} - true если сообщение обработано, false если нужно продолжить обычную обработку
+   */
+  async handleTrimInput(msg) {
+    const text = msg.text;
+    const userId = msg.from.id;
+    const chatId = msg.chat.id;
+
+    // Если пользователь отправил URL — отменяем обрезку и обрабатываем как обычно
+    const { URLValidator } = require('./src/utils');
+    if (URLValidator.isSupportedUrl(text)) {
+      this.pendingTrims.delete(userId);
+      return false;
+    }
+
+    const trimState = this.pendingTrims.get(userId);
+    if (!trimState) return true;
+
+    const seconds = this.parseTimeToSeconds(text.trim());
+
+    if (seconds === null) {
+      await this.telegramApi.sendMessage(chatId,
+        '❌ Неверный формат времени. Используйте формат <code>ЧЧ:ММ:СС</code>\n' +
+        'Например: <code>00:01:30</code>',
+        { parse_mode: 'HTML' }
+      );
+      return true;
+    }
+
+    if (trimState.step === 'start') {
+      trimState.startTime = seconds;
+      trimState.step = 'end';
+
+      const startTimeStr = this.formatSecondsToTime(seconds);
+      await this.telegramHelper.sendTrimEndPrompt(chatId, startTimeStr);
+    } else if (trimState.step === 'end') {
+      if (trimState.startTime !== null && seconds <= trimState.startTime) {
+        await this.telegramApi.sendMessage(chatId,
+          '❌ Время конца должно быть больше времени начала.',
+          { parse_mode: 'HTML' }
+        );
+        return true;
+      }
+
+      trimState.endTime = seconds;
+      await this.startTrimDownload(chatId, userId, trimState);
+    }
+
+    return true;
+  }
+
+  /**
+   * Запускает скачивание и обрезку видео
+   * @param {number} chatId - ID чата
+   * @param {number} userId - ID пользователя
+   * @param {Object} trimState - состояние обрезки
+   */
+  async startTrimDownload(chatId, userId, trimState) {
+    try {
+      this.pendingTrims.delete(userId);
+
+      await this.telegramApi.sendChatAction(chatId, 'typing');
+
+      const videoInfo = await this.videoProcessor.getVideoInfo(trimState.url);
+      const format = this.findFormatWithFallback(videoInfo.formats, trimState.formatId, trimState.quality, trimState.videoId, userId);
+
+      if (!format) {
+        await this.telegramHelper.sendError(chatId, 'format_unavailable');
+        return;
+      }
+
+      await this.processVideoDownload(
+        chatId, userId, trimState.url, videoInfo, format, trimState.quality,
+        false, null,
+        trimState.startTime, trimState.endTime
+      );
+    } catch (error) {
+      Logger.error('Error in trim download', error, { userId });
+      await this.telegramHelper.sendError(chatId, 'unknown');
     }
   }
 

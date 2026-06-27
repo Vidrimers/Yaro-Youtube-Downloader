@@ -304,6 +304,63 @@ class FileManager {
     });
   }
 
+  /**
+   * Обрезает видео по времени начала и конца (без перекодирования).
+   * @param {string} inputPath - путь к исходному видео
+   * @param {string} outputPath - путь для сохранения результата
+   * @param {number|null} startSeconds - время начала в секундах (null = с самого начала)
+   * @param {number|null} endSeconds - время конца в секундах (null = до конца)
+   * @returns {Promise<string>} - путь к обрезанному файлу
+   */
+  async trimVideo(inputPath, outputPath, startSeconds, endSeconds) {
+    return new Promise((resolve, reject) => {
+      const args = [];
+      if (startSeconds > 0) {
+        args.push('-ss', String(startSeconds));
+      }
+      args.push('-i', inputPath);
+      if (endSeconds !== null && endSeconds !== undefined) {
+        if (startSeconds > 0) {
+          args.push('-t', String(endSeconds - startSeconds));
+        } else {
+          args.push('-to', String(endSeconds));
+        }
+      }
+      args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', '-y', outputPath);
+
+      Logger.info('Trimming video', { inputPath, outputPath, startSeconds, endSeconds });
+
+      const ffmpeg = spawn('ffmpeg', args);
+      let stderr = '';
+
+      ffmpeg.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      const timeoutId = setTimeout(() => {
+        ffmpeg.kill('SIGKILL');
+        reject(new Error('TRIM_TIMEOUT'));
+      }, this.mergeTimeout);
+
+      ffmpeg.on('close', (code) => {
+        clearTimeout(timeoutId);
+        if (code === 0) {
+          Logger.info('Video trimmed successfully', { outputPath });
+          resolve(outputPath);
+        } else {
+          Logger.error('ffmpeg trim failed', new Error(stderr), { code });
+          reject(new Error('TRIM_FAILED'));
+        }
+      });
+
+      ffmpeg.on('error', (error) => {
+        clearTimeout(timeoutId);
+        Logger.error('ffmpeg trim process error', error);
+        reject(error);
+      });
+    });
+  }
+
   /** Склеивает части видео через concat demuxer (без перекодирования) */
   _ffmpegConcat(concatListPath, outputPath) {
     return new Promise((resolve, reject) => {
