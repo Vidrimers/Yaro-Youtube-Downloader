@@ -155,8 +155,12 @@ class VideoProcessor {
    * @returns {Promise<string>} - прямая ссылка на скачивание
    * @throws {Error} - если не удалось получить ссылку
    */
-  async getDirectUrl(url, formatId) {
-    const args = ['-f', formatId, '-g', '--no-warnings', url];
+  async getDirectUrl(url, formatId, cookiesFile) {
+    const args = ['-f', formatId, '-g', '--no-warnings'];
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    }
+    args.push(url);
     const timeout = config.YTDLP_URL_TIMEOUT;
     
     try {
@@ -200,15 +204,17 @@ class VideoProcessor {
    * @returns {Promise<string>} - путь к скачанному файлу
    * @throws {Error} - если не удалось скачать
    */
-  async downloadVideo(url, formatId, outputPath, timeout = 300000) {
-    // Для комбинированных форматов yt-dlp автоматически объединит видео и аудио
+  async downloadVideo(url, formatId, outputPath, timeout = 300000, cookiesFile) {
     const args = [
       '-f', formatId,
-      '--merge-output-format', 'mp4', // Объединяем в mp4
+      '--merge-output-format', 'mp4',
       '-o', outputPath,
-      '--no-warnings',
-      url
+      '--no-warnings'
     ];
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    }
+    args.push(url);
     
     try {
       await this.executeYtDlp(args, timeout);
@@ -238,13 +244,16 @@ class VideoProcessor {
    * @param {number} timeout - timeout в миллисекундах
    * @returns {Promise<string>} - путь к скачанному файлу
    */
-  async downloadStream(url, formatId, outputPath, timeout = 300000) {
+  async downloadStream(url, formatId, outputPath, timeout = 300000, cookiesFile) {
     const args = [
       '-f', formatId,
       '-o', outputPath,
-      '--no-warnings',
-      url
+      '--no-warnings'
     ];
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    }
+    args.push(url);
     
     try {
       await this.executeYtDlp(args, timeout);

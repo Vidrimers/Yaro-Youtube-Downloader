@@ -74,6 +74,9 @@ class Config {
     // Instagram cookies
     this.INSTAGRAM_COOKIES_FILE = null; // Путь к cookies.txt для Instagram
     
+    // YouTube cookies
+    this.YOUTUBE_COOKIES_FILE = null; // Путь к cookies.txt для YouTube
+    
     // Extension API
     this.API_SECRET_KEY = null; // Ключ для доступа к REST API расширения
   }
@@ -300,6 +303,11 @@ class Config {
       this.INSTAGRAM_COOKIES_FILE = process.env.INSTAGRAM_COOKIES_FILE;
     }
     
+    // YouTube cookies
+    if (process.env.YOUTUBE_COOKIES_FILE) {
+      this.YOUTUBE_COOKIES_FILE = process.env.YOUTUBE_COOKIES_FILE;
+    }
+    
     // Extension API
     if (process.env.API_SECRET_KEY) {
       this.API_SECRET_KEY = process.env.API_SECRET_KEY;
@@ -404,6 +412,7 @@ class Config {
       TRON_API_KEY: this.TRON_API_KEY,
       TELEGRAM_ADMIN_ID: this.TELEGRAM_ADMIN_ID,
       INSTAGRAM_COOKIES_FILE: this.INSTAGRAM_COOKIES_FILE,
+      YOUTUBE_COOKIES_FILE: this.YOUTUBE_COOKIES_FILE,
       API_SECRET_KEY: this.API_SECRET_KEY
     };
   }

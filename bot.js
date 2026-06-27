@@ -1096,7 +1096,7 @@ class BotController {
       } else {
         // Обычная прямая ссылка
         await this.telegramApi.sendChatAction(chatId, 'typing');
-        const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id);
+        const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id, this.config.YOUTUBE_COOKIES_FILE);
         await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
       }
       
@@ -1205,7 +1205,7 @@ class BotController {
       
       for (const videoFmt of formatsToTry) {
         try {
-          await this.videoProcessor.downloadStream(url, videoFmt.format_id, videoPath, this.config.DOWNLOAD_TIMEOUT);
+          await this.videoProcessor.downloadStream(url, videoFmt.format_id, videoPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
           Logger.info('Video downloaded successfully', { userId, formatId: videoFmt.format_id });
           videoDownloaded = true;
           break;
@@ -1248,7 +1248,7 @@ class BotController {
       
       for (const audioFmt of allAudioFormats) {
         try {
-          await this.videoProcessor.downloadStream(url, audioFmt.format_id, audioPath, this.config.DOWNLOAD_TIMEOUT);
+          await this.videoProcessor.downloadStream(url, audioFmt.format_id, audioPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
           Logger.info('Audio downloaded successfully', { userId, formatId: audioFmt.format_id });
           audioDownloaded = true;
           break;
@@ -1581,7 +1581,7 @@ class BotController {
             
             // Пытаемся скачать комбинированный формат
             const combinedOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'mp4');
-            await this.videoProcessor.downloadVideo(url, combinedFormats[0].format_id, combinedOutputPath, this.config.DOWNLOAD_TIMEOUT);
+            await this.videoProcessor.downloadVideo(url, combinedFormats[0].format_id, combinedOutputPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
             
             const fileSize = await this.fileManager.getFileSize(combinedOutputPath);
             
@@ -1600,7 +1600,7 @@ class BotController {
             // Если нет комбинированных форматов, пытаемся отправить прямую ссылку
             Logger.info('No combined formats available, trying direct URL', { userId });
             
-            const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id);
+            const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id, this.config.YOUTUBE_COOKIES_FILE);
             await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
             
             await this.telegramApi.sendMessage(chatId, 
