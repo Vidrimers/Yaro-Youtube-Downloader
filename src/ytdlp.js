@@ -205,6 +205,9 @@ class VideoProcessor {
    * @throws {Error} - если не удалось скачать
    */
   async downloadVideo(url, formatId, outputPath, timeout = 300000, cookiesFile) {
+    const { Logger } = require('./utils');
+    Logger.info('downloadVideo called', { formatId, cookiesFile: cookiesFile || 'none', url });
+    
     const args = [
       '-f', formatId,
       '--merge-output-format', 'mp4',
