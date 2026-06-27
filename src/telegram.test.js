@@ -412,7 +412,7 @@ describe('TelegramHelper Unit Tests', () => {
       expect(message.text).toContain('3:33'); // 213 секунд = 3:33
       expect(message.text).toContain('Test Channel');
       expect(message.text).toContain('Выберите качество');
-      expect(message.options.parse_mode).toBe('Markdown');
+      expect(message.options.parse_mode).toBe('HTML');
       expect(message.options.reply_markup).toBeDefined();
     });
   });

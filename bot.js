@@ -458,6 +458,12 @@ class BotController {
       // Отправляем индикатор "печатает..."
       await this.telegramApi.sendChatAction(chatId, 'typing');
       
+      // Instagram — прямое скачивание без выбора качества
+      if (URLValidator.isInstagramUrl(normalizedUrl)) {
+        await this.processInstagramDownload(chatId, userId, normalizedUrl, username);
+        return;
+      }
+      
       // Получаем информацию о видео
       const videoInfo = await this.videoProcessor.getVideoInfo(normalizedUrl);
       
@@ -1547,6 +1553,161 @@ class BotController {
         if (videoPath || audioPath) {
           await this.fileManager.deleteFiles([videoPath, audioPath].filter(Boolean));
         }
+      }
+    }
+  }
+
+  /**
+   * Обрабатывает скачивание Instagram контента (reels, post, story)
+   * @param {number} chatId - ID чата
+   * @param {number} userId - ID пользователя
+   * @param {string} url - Instagram URL
+   * @param {string} username - имя пользователя
+   */
+  async processInstagramDownload(chatId, userId, url, username) {
+    let statusMessage = null;
+    let outputPath = null;
+    let fileUsedByServer = false;
+    
+    try {
+      // Получаем информацию о видео
+      const videoInfo = await this.videoProcessor.getVideoInfo(url);
+      
+      if (!videoInfo) {
+        await this.telegramHelper.sendError(chatId, 'video_unavailable');
+        return;
+      }
+      
+      // Отправляем статус
+      statusMessage = await this.telegramHelper.sendDownloadStatus(chatId, 'downloading');
+      
+      // Генерируем путь для файла
+      const videoId = videoInfo.id || `ig_${Date.now()}`;
+      outputPath = this.fileManager.generateFilePath(videoId, 'mp4');
+      
+      // Скачиваем Instagram контент
+      Logger.info('Downloading Instagram content', { userId, url, videoId });
+      await this.videoProcessor.downloadInstagram(url, outputPath, this.config.DOWNLOAD_TIMEOUT);
+      
+      // Проверяем размер файла
+      const fileSize = await this.fileManager.getFileSize(outputPath);
+      Logger.info('Instagram content downloaded', { userId, videoId, fileSize });
+      
+      // Лимиты для отправки
+      const TELEGRAM_STABLE_LIMIT = 104857600; // 100MB
+      const TELEGRAM_TRY_LIMIT = this.config.TELEGRAM_UPLOAD_LIMIT; // 500MB
+      
+      if (fileSize <= TELEGRAM_STABLE_LIMIT) {
+        // Отправляем в Telegram
+        await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+        await this.telegramApi.sendChatAction(chatId, 'upload_video');
+        
+        const quality = videoInfo.title ? 'instagram' : 'best';
+        await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+        
+        Logger.info('Instagram content sent to Telegram', { userId, videoId, fileSize });
+        
+      } else if (fileSize <= TELEGRAM_TRY_LIMIT) {
+        // Пытаемся отправить в Telegram, при неудаче — ссылка на сервер
+        try {
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+          await this.telegramApi.sendChatAction(chatId, 'upload_video');
+          
+          const quality = videoInfo.title ? 'instagram' : 'best';
+          await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          
+          Logger.info('Large Instagram content sent to Telegram', { userId, videoId, fileSize });
+          
+        } catch (uploadError) {
+          Logger.warn('Telegram upload failed for Instagram, creating server link', { 
+            userId, fileSize, error: uploadError.message 
+          });
+          
+          const linkInfo = await this.fileServer.createTemporaryLink(
+            path.resolve(outputPath),
+            `${videoInfo.title || videoId}.mp4`,
+            this.config.LARGE_FILE_TTL_MINUTES
+          );
+          
+          fileUsedByServer = true;
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+          
+          const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
+          await this.telegramApi.sendMessage(chatId,
+            `📁 <b>Файл готов для скачивания!</b>\n\n` +
+            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+            `⏰ Ссылка действует до: ${expiresAt}`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+                ]]
+              }
+            }
+          );
+        }
+        
+      } else {
+        // Файл слишком большой — сразу ссылка на сервер
+        const linkInfo = await this.fileServer.createTemporaryLink(
+          path.resolve(outputPath),
+          `${videoInfo.title || videoId}.mp4`,
+          this.config.LARGE_FILE_TTL_MINUTES
+        );
+        
+        fileUsedByServer = true;
+        
+        if (statusMessage) {
+          try { await this.telegramApi.deleteMessage(chatId, statusMessage.message_id); } catch {}
+        }
+        
+        const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
+        await this.telegramApi.sendMessage(chatId,
+          `📁 <b>Файл готов для скачивания!</b>\n\n` +
+          `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+          `⏰ Ссылка действует до: ${expiresAt}\n\n` +
+          `ℹ️ Файл слишком большой для Telegram.`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
+              ]]
+            }
+          }
+        );
+      }
+      
+    } catch (error) {
+      Logger.error('Error downloading Instagram content', error, { userId, url, username });
+      
+      if (statusMessage) {
+        try { await this.telegramApi.deleteMessage(chatId, statusMessage.message_id); } catch {}
+      }
+      
+      let errorType = 'unknown';
+      if (error.message === 'TIMEOUT') {
+        errorType = 'timeout';
+      } else if (error.message === 'INSTAGRAM_LOGIN_REQUIRED') {
+        await this.telegramApi.sendMessage(chatId,
+          '🔒 *Требуется авторизация*\n\n' +
+          'Этот контент Instagram требует входа в аккаунт.\n' +
+          'Попробуйте другую ссылку (публичный пост/reel).'
+        );
+        return;
+      } else if (error.message === 'INSTAGRAM_UNAVAILABLE') {
+        errorType = 'video_unavailable';
+      } else if (error.message === 'NETWORK_ERROR') {
+        errorType = 'network_error';
+      } else if (error.message === 'DOWNLOAD_FAILED') {
+        errorType = 'download_failed';
+      }
+      
+      await this.telegramHelper.sendError(chatId, errorType);
+    } finally {
+      if (!fileUsedByServer && outputPath) {
+        await this.fileManager.deleteFile(outputPath).catch(() => {});
       }
     }
   }

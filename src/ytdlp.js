@@ -264,6 +264,58 @@ class VideoProcessor {
   }
 
   /**
+   * Скачивает Instagram контент (reels, post, story)
+   * @param {string} url - Instagram URL
+   * @param {string} outputPath - путь для сохранения файла
+   * @param {number} timeout - timeout в миллисекундах
+   * @returns {Promise<string>} - путь к скачанному файлу
+   */
+  async downloadInstagram(url, outputPath, timeout = 300000) {
+    const args = [
+      '-o', outputPath,
+      '--no-warnings',
+      url
+    ];
+    
+    try {
+      await this.executeYtDlp(args, timeout);
+      return outputPath;
+    } catch (error) {
+      const { Logger } = require('./utils');
+      Logger.error('Instagram download failed', error, { 
+        url, 
+        outputPath,
+        stderr: error.stderr || 'no stderr',
+        message: error.message 
+      });
+      
+      if (error.message === 'TIMEOUT') {
+        throw new Error('TIMEOUT');
+      }
+      
+      if (error.stderr) {
+        if (error.stderr.includes('Login required') || 
+            error.stderr.includes('login') ||
+            error.stderr.includes('authentication')) {
+          throw new Error('INSTAGRAM_LOGIN_REQUIRED');
+        }
+        
+        if (error.stderr.includes('Video unavailable') ||
+            error.stderr.includes('Post not found') ||
+            error.stderr.includes('not found')) {
+          throw new Error('INSTAGRAM_UNAVAILABLE');
+        }
+        
+        if (error.stderr.includes('network') || error.stderr.includes('Connection')) {
+          throw new Error('NETWORK_ERROR');
+        }
+      }
+      
+      throw new Error('DOWNLOAD_FAILED');
+    }
+  }
+
+  /**
    * Получает лучший аудио формат для видео
    * @param {Array} formats - массив всех форматов
    * @returns {Object|null} - лучший аудио формат или null
