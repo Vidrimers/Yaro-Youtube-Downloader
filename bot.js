@@ -2335,7 +2335,7 @@ class BotController {
 
       await this.telegramApi.sendMessage(chatId,
         `🚫 <b>Вы заблокированы на ${label}.</b>\n\n` +
-        'Слишком много попыток доступа к админ-командам.' +
+        'Слишком много бесполезных попыток доступа к админ-командам.' +
         nextBanText
       , { parse_mode: 'HTML' });
 
