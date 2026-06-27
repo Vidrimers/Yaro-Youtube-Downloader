@@ -382,6 +382,11 @@ class BotController {
             await this.handleBalanceCommand(chatId);
           } else {
             Logger.info(`Unauthorized balance command attempt`, { userId, username });
+            await this.telegramApi.sendMessage(chatId,
+              '👁‍🗨 <b>Мы всё видим.</b>\n\n' +
+              'Не надо так. Это сомнительное решение с твоей стороны.\n\n' +
+              '⚠️ Твои действия были зафиксированы.'
+            , { parse_mode: 'HTML' });
             if (this.config.TELEGRAM_ADMIN_ID) {
               await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
                 `⚠️ <b>Попытка доступа к балансам</b>\n\n` +
@@ -402,6 +407,11 @@ class BotController {
             await this.handleAdminMenu(chatId);
           } else {
             Logger.info(`Unauthorized admin command attempt`, { userId, username });
+            await this.telegramApi.sendMessage(chatId,
+              '👁‍🗨 <b>Мы всё видим.</b>\n\n' +
+              'Не надо так. Это сомнительное решение с твоей стороны.\n\n' +
+              '⚠️ Твои действия были зафиксированы.'
+            , { parse_mode: 'HTML' });
             if (this.config.TELEGRAM_ADMIN_ID) {
               await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
                 `⚠️ <b>Попытка доступа к админ-панели</b>\n\n` +
