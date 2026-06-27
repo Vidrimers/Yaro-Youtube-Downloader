@@ -387,7 +387,10 @@ class BotController {
                 `⚠️ <b>Попытка доступа к балансам</b>\n\n` +
                 `👤 @${username} (ID: <code>${userId}</code>)\n` +
                 `📝 Команда: /balance`,
-                { parse_mode: 'HTML' }
+                {
+                  parse_mode: 'HTML',
+                  reply_markup: this.banManager.getNotifyKeyboard(userId)
+                }
               );
             }
           }
@@ -404,7 +407,10 @@ class BotController {
                 `⚠️ <b>Попытка доступа к админ-панели</b>\n\n` +
                 `👤 @${username} (ID: <code>${userId}</code>)\n` +
                 `📝 Команда: /admin`,
-                { parse_mode: 'HTML' }
+                {
+                  parse_mode: 'HTML',
+                  reply_markup: this.banManager.getNotifyKeyboard(userId)
+                }
               );
             }
           }
