@@ -120,6 +120,9 @@ class BotController {
     // Запускаем проверку cookies YouTube
     this.startCookiesHealthCheck();
     
+    // Запускаем проверку cookies Instagram
+    this.startInstagramCookiesHealthCheck();
+    
     // Обработчик команд
     this.bot.onText(/^\/(.+)$/, (msg, match) => {
       const command = match[1].split(' ')[0];
@@ -257,6 +260,79 @@ class BotController {
     setTimeout(check, 60 * 1000);
     setInterval(check, CHECK_INTERVAL);
     Logger.info('Cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
+  }
+
+  /**
+   * Периодическая проверка доступности скачивания Instagram контента
+   * Если Instagram cookies протухли — уведомляет админа
+   */
+  startInstagramCookiesHealthCheck() {
+    const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+    const TEST_URL = 'https://www.instagram.com/p/C0DdHiOrqO_/';
+    this.instagramCookiesAlertSent = false;
+
+    const check = async () => {
+      if (!this.config.TELEGRAM_ADMIN_ID) return;
+      if (!this.config.INSTAGRAM_COOKIES_FILE) {
+        Logger.info('Instagram cookies check skipped (no INSTAGRAM_COOKIES_FILE configured)');
+        return;
+      }
+
+      try {
+        const { spawn } = require('child_process');
+        const result = await new Promise((resolve) => {
+          const proc = spawn('yt-dlp', [
+            '--cookies', this.config.INSTAGRAM_COOKIES_FILE,
+            '-j', '--no-warnings', TEST_URL
+          ]);
+          let stderr = '';
+          proc.stderr.on('data', (d) => { stderr += d.toString(); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve({ ok: false, reason: 'timeout' }); }, 60000);
+          proc.on('close', (code) => {
+            clearTimeout(timeout);
+            resolve({ ok: code === 0, reason: stderr });
+          });
+          proc.on('error', (err) => {
+            clearTimeout(timeout);
+            resolve({ ok: false, reason: err.message });
+          });
+        });
+
+        if (result.ok) {
+          if (this.instagramCookiesAlertSent) {
+            this.instagramCookiesAlertSent = false;
+            Logger.info('Instagram cookies recovered');
+          }
+          Logger.info('Instagram cookies health check passed');
+        } else {
+          Logger.warn('Instagram cookies health check failed', { reason: result.reason });
+
+          if (!this.instagramCookiesAlertSent) {
+            this.instagramCookiesAlertSent = true;
+            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+              '📸 <b>Instagram cookies протухли!</b>\n\n' +
+              'Скачивание Instagram не работает.\n\n' +
+              '<b>Как обновить:</b>\n' +
+              '1. Открой Instagram в Chrome, залогинься\n' +
+              '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
+              '3. Нажми на иконку расширения → <b>Export</b>\n' +
+              '4. Загрузи файл на сервер:\n' +
+              '<code>scp instagram_cookies.txt prod:/home/ytdownload/instagram_cookies.txt</code>\n' +
+              '5. Перезапусти бота:\n' +
+              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
+              '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
+              { parse_mode: 'HTML', disable_web_page_preview: true }
+            );
+          }
+        }
+      } catch (error) {
+        Logger.error('Instagram cookies health check error', error);
+      }
+    };
+
+    setTimeout(check, 2 * 60 * 1000);
+    setInterval(check, CHECK_INTERVAL);
+    Logger.info('Instagram cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
   }
 
   /**
