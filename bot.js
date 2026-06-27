@@ -66,6 +66,10 @@ class BotController {
     // Кэш username пользователей для системы банов
     this.usernames = new Map();
 
+    // Трекер попыток доступа к админ-командам
+    // Map<userId, { count: number, firstAttempt: timestamp }>
+    this.adminAccessAttempts = new Map();
+
     // Map<adminId, { targetUserId, duration }> — ожидание причины бана от админа
     this.pendingBanReasons = new Map();
     
@@ -348,6 +352,14 @@ class BotController {
     Logger.userAction(userId, username, `command: /${command}`);
     
     try {
+      // Проверка бана
+      const banStatus = this.banManager.isBanned(userId);
+      if (banStatus.banned) {
+        const until = banStatus.until ? `до ${this.banManager.formatUntil(banStatus.until)}` : 'навсегда';
+        await this.telegramApi.sendMessage(chatId, `🚫 Вы заблокированы ${until}.`);
+        return;
+      }
+      
       switch (command) {
         case 'start':
           await this.telegramHelper.sendWelcome(chatId);
@@ -398,6 +410,8 @@ class BotController {
                 }
               );
             }
+            // Трекинг попыток и авто-бан
+            await this.trackAdminAccessAttempt(chatId, userId, username, '/balance');
           }
           break;
 
@@ -423,6 +437,8 @@ class BotController {
                 }
               );
             }
+            // Трекинг попыток и авто-бан
+            await this.trackAdminAccessAttempt(chatId, userId, username, '/admin');
           }
           break;
           
@@ -2272,6 +2288,64 @@ class BotController {
       await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID, message, options);
     } catch (error) {
       Logger.warn('Failed to notify admin', { error: error.message });
+    }
+  }
+
+  /**
+   * Трекает попытки доступа к админ-командам и банит после 3-х
+   * @param {number} chatId - ID чата
+   * @param {number} userId - ID пользователя
+   * @param {string} username - имя пользователя
+   * @param {string} command - команда (/admin или /balance)
+   */
+  async trackAdminAccessAttempt(chatId, userId, username, command) {
+    const now = Date.now();
+    const MAX_ATTEMPTS = 3;
+    const BAN_DURATION = '1h';
+    const WINDOW_MS = 30 * 60 * 1000; // 30 минут — окно для подсчёта попыток
+
+    const attempt = this.adminAccessAttempts.get(userId);
+
+    if (!attempt || (now - attempt.firstAttempt) > WINDOW_MS) {
+      // Новый цикл попыток
+      this.adminAccessAttempts.set(userId, { count: 1, firstAttempt: now });
+      return;
+    }
+
+    // Увеличиваем счётчик
+    attempt.count++;
+
+    if (attempt.count >= MAX_ATTEMPTS) {
+      // Авто-бан на 1 час
+      await this.banManager.ban(userId, username, BAN_DURATION, `Авто-бан: ${attempt.count} попыток доступа к ${command}`);
+      this.adminAccessAttempts.delete(userId);
+
+      // Уведомляем пользователя
+      await this.telegramApi.sendMessage(chatId,
+        '🚫 <b>Вы заблокированы на 1 час.</b>\n\n' +
+        'Слишком много попыток доступа к админ-командам.\n\n' +
+        '⚠️ Следующий бан будет дольше.'
+      , { parse_mode: 'HTML' });
+
+      // Уведомляем админа
+      if (this.config.TELEGRAM_ADMIN_ID) {
+        await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+          `🚫 <b>Авто-бан!</b>\n\n` +
+          `👤 @${username} (ID: <code>${userId}</code>)\n` +
+          `📝 ${attempt.count} попыток доступа к ${command}\n` +
+          `⏱ Забанен на 1 час`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: attempt.count, command });
+    } else {
+      // Предупреждаем о оставшихся попытках
+      const remaining = MAX_ATTEMPTS - attempt.count;
+      await this.telegramApi.sendMessage(chatId,
+        `⚠️ <b>Осталось попыток: ${remaining}</b>\n\n` +
+        'После этого вы будете заблокированы.'
+      , { parse_mode: 'HTML' });
     }
   }
 
