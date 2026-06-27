@@ -53,6 +53,16 @@ class BotController {
     this.db = new Database(path.resolve('stats.db'));
     this.db.pragma('journal_mode = WAL');
 
+    // Admin access attempts table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS admin_attempts (
+        user_id INTEGER PRIMARY KEY,
+        count INTEGER DEFAULT 0,
+        first_attempt INTEGER,
+        ban_count INTEGER DEFAULT 0
+      )
+    `);
+
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
       config.RATE_LIMIT_WINDOW_MS,
@@ -77,11 +87,6 @@ class BotController {
 
     // Кэш username пользователей для системы банов
     this.usernames = new Map();
-
-    // Трекер попыток доступа к админ-командам
-    // Map<userId, { count: number, firstAttempt: number, banCount: number }>
-    this.adminAccessAttempts = new Map();
-    this.adminAttemptsFile = path.resolve('admin_attempts.json');
 
     // Map<adminId, { targetUserId, duration }> — ожидание причины бана от админа
     this.pendingBanReasons = new Map();
@@ -2381,38 +2386,32 @@ class BotController {
   async trackAdminAccessAttempt(chatId, userId, username, command) {
     const now = Date.now();
     const MAX_ATTEMPTS = 3;
-    const WINDOW_MS = 30 * 60 * 1000; // 30 минут — окно для подсчёта попыток
+    const WINDOW_MS = 30 * 60 * 1000;
 
-    // Порядок эскалации банов
     const BAN_ESCALATION = ['1h', '1d', '1m', 'forever'];
 
-    const attempt = this.adminAccessAttempts.get(userId);
+    const row = this.db.prepare('SELECT * FROM admin_attempts WHERE user_id = ?').get(userId);
 
-    if (!attempt || (now - attempt.firstAttempt) > WINDOW_MS) {
-      // Новый цикл попыток
-      this.adminAccessAttempts.set(userId, { count: 1, firstAttempt: now });
-      await this.saveAdminAttempts();
+    if (!row || (now - row.first_attempt) > WINDOW_MS) {
+      this.db.prepare('INSERT OR REPLACE INTO admin_attempts (user_id, count, first_attempt, ban_count) VALUES (?, 1, ?, ?)')
+        .run(userId, now, row ? row.ban_count : 0);
       return;
     }
 
-    // Увеличиваем счётчик
-    attempt.count++;
+    const newCount = row.count + 1;
 
-    if (attempt.count >= MAX_ATTEMPTS) {
-      // Определяем количество предыдущих банов для эскалации
-      const banHistory = attempt.banCount || 0;
+    if (newCount >= MAX_ATTEMPTS) {
+      const banHistory = row.ban_count || 0;
       const durationIndex = Math.min(banHistory, BAN_ESCALATION.length - 1);
       const duration = BAN_ESCALATION[durationIndex];
       const label = BAN_LABELS[duration];
 
-      await this.banManager.ban(userId, username, duration, `Авто-бан: ${attempt.count} попыток доступа к ${command}`);
-      this.adminAccessAttempts.set(userId, { count: 0, firstAttempt: now, banCount: banHistory + 1 });
-      await this.saveAdminAttempts();
+      await this.banManager.ban(userId, username, duration, `Авто-бан: ${newCount} попыток доступа к ${command}`);
+      this.db.prepare('INSERT OR REPLACE INTO admin_attempts (user_id, count, first_attempt, ban_count) VALUES (?, 0, ?, ?)')
+        .run(userId, now, banHistory + 1);
 
       const isLastBan = duration === 'forever';
-      const nextBanText = isLastBan
-        ? ''
-        : '\n\n⚠️ Следующий бан будет дольше ;-)';
+      const nextBanText = isLastBan ? '' : '\n\n⚠️ Следующий бан будет дольше ;-)';
 
       await this.telegramApi.sendMessage(chatId,
         `🚫 <b>Вы заблокированы на ${label}.</b>\n\n` +
@@ -2424,17 +2423,17 @@ class BotController {
         await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
           `🚫 <b>Авто-бан!</b>\n\n` +
           `👤 @${username} (ID: <code>${userId}</code>)\n` +
-          `📝 ${attempt.count} попыток доступа к ${command}\n` +
+          `📝 ${newCount} попыток доступа к ${command}\n` +
           `⏱ Забанен на ${label}\n` +
           `🔄 Всего банов: ${banHistory + 1}`,
           { parse_mode: 'HTML' }
         );
       }
 
-      Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: attempt.count, duration, banCount: banHistory + 1, command });
+      Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: newCount, duration, banCount: banHistory + 1, command });
     } else {
-      await this.saveAdminAttempts();
-      const remaining = MAX_ATTEMPTS - attempt.count;
+      this.db.prepare('UPDATE admin_attempts SET count = ? WHERE user_id = ?').run(newCount, userId);
+      const remaining = MAX_ATTEMPTS - newCount;
       await this.telegramApi.sendMessage(chatId,
         `⚠️ <b>Осталось попыток: ${remaining}</b>\n\n` +
         'После этого вы будете заблокированы.'
@@ -2443,36 +2442,44 @@ class BotController {
   }
 
   /**
-   * Загружает счётчик попыток из файла
+   * Загружает счётчик попыток (миграция из JSON при первом запуске)
    */
   async loadAdminAttempts() {
+    const count = this.db.prepare('SELECT COUNT(*) as c FROM admin_attempts').get().c;
+
+    if (count === 0) {
+      await this.migrateAdminAttemptsFromJson();
+    }
+
+    const finalCount = this.db.prepare('SELECT COUNT(*) as c FROM admin_attempts').get().c;
+    Logger.info('Admin access attempts loaded from DB', { count: finalCount });
+  }
+
+  async migrateAdminAttemptsFromJson() {
     try {
       const fs = require('fs').promises;
-      const data = await fs.readFile(this.adminAttemptsFile, 'utf8');
+      const data = await fs.readFile(path.resolve('admin_attempts.json'), 'utf8');
       const json = JSON.parse(data);
-      this.adminAccessAttempts = new Map(
-        Object.entries(json).map(([id, info]) => [parseInt(id), info])
-      );
-      Logger.info('Admin access attempts loaded', { count: this.adminAccessAttempts.size });
+      const insert = this.db.prepare('INSERT OR IGNORE INTO admin_attempts (user_id, count, first_attempt, ban_count) VALUES (?, ?, ?, ?)');
+
+      const migrate = this.db.transaction(() => {
+        for (const [userId, info] of Object.entries(json)) {
+          insert.run(parseInt(userId), info.count || 0, info.firstAttempt || 0, info.banCount || 0);
+        }
+      });
+      migrate();
+
+      Logger.info('Migrated admin attempts from JSON to SQLite', { count: Object.keys(json).length });
     } catch {
-      this.adminAccessAttempts = new Map();
+      // admin_attempts.json не существует — нормально
     }
   }
 
   /**
-   * Сохраняет счётчик попыток в файл
+   * Сохраняет счётчик попыток (совместимость — данные в SQLite, сохраняются сразу)
    */
   async saveAdminAttempts() {
-    try {
-      const fs = require('fs').promises;
-      const obj = {};
-      for (const [userId, info] of this.adminAccessAttempts) {
-        obj[userId] = info;
-      }
-      await fs.writeFile(this.adminAttemptsFile, JSON.stringify(obj, null, 2), 'utf8');
-    } catch (error) {
-      Logger.warn('Failed to save admin access attempts', { error: error.message });
-    }
+    // With SQLite each operation is immediate
   }
 
   /**
