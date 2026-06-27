@@ -5,16 +5,15 @@ const { Logger } = require('./utils');
  * StatsManager - статистика скачиваний через SQLite
  */
 class StatsManager {
-  constructor(dbPath) {
-    this.dbPath = dbPath || path.resolve('stats.db');
-    this.db = null;
+  constructor(db) {
+    this.db = db;
   }
 
   async initialize() {
-    const Database = require('better-sqlite3');
-    this.db = new Database(this.dbPath);
-
-    this.db.pragma('journal_mode = WAL');
+    if (!this.db) {
+      Logger.warn('StatsManager: no DB provided');
+      return;
+    }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS downloads (
@@ -36,7 +35,7 @@ class StatsManager {
       CREATE INDEX IF NOT EXISTS idx_platform ON downloads(platform);
     `);
 
-    Logger.info('StatsManager initialized', { dbPath: this.dbPath });
+    Logger.info('StatsManager initialized');
   }
 
   recordDownload(options = {}) {

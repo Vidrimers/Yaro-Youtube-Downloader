@@ -230,17 +230,31 @@ class Formatter {
 }
 
 /**
- * RateLimiter - класс для ограничения частоты запросов
+ * RateLimiter - класс для ограничения частоты запросов (SQLite)
  */
 class RateLimiter {
   /**
    * @param {number} maxRequests - максимальное количество запросов
    * @param {number} windowMs - временное окно в миллисекундах
+   * @param {object} db - экземпляр better-sqlite3 (опционально)
    */
-  constructor(maxRequests, windowMs) {
+  constructor(maxRequests, windowMs, db = null) {
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
-    this.requests = new Map(); // userId -> массив timestamp'ов
+    this.db = db;
+    // In-memory cache for fast lookups
+    this.requests = new Map();
+
+    if (this.db) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS rate_limits (
+          user_id INTEGER,
+          timestamp INTEGER
+        )
+      `);
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_rl_user ON rate_limits(user_id)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_rl_ts ON rate_limits(timestamp)');
+    }
   }
 
   /**
@@ -249,15 +263,20 @@ class RateLimiter {
    * @returns {boolean} - true если может сделать запрос
    */
   canMakeRequest(userId) {
-    this.cleanup();
-    
-    const userRequests = this.requests.get(userId) || [];
     const now = Date.now();
     const windowStart = now - this.windowMs;
-    
-    // Фильтруем запросы в текущем окне
+
+    if (this.db) {
+      const count = this.db.prepare(
+        'SELECT COUNT(*) as c FROM rate_limits WHERE user_id = ? AND timestamp > ?'
+      ).get(userId, windowStart).c;
+      return count < this.maxRequests;
+    }
+
+    // Fallback to in-memory
+    this.cleanup();
+    const userRequests = this.requests.get(userId) || [];
     const recentRequests = userRequests.filter(timestamp => timestamp > windowStart);
-    
     return recentRequests.length < this.maxRequests;
   }
 
@@ -267,13 +286,21 @@ class RateLimiter {
    */
   recordRequest(userId) {
     const now = Date.now();
+
+    if (this.db) {
+      this.db.prepare('INSERT INTO rate_limits (user_id, timestamp) VALUES (?, ?)').run(userId, now);
+      // Cleanup old entries periodically
+      if (Math.random() < 0.05) {
+        this.db.prepare('DELETE FROM rate_limits WHERE timestamp < ?').run(now - this.windowMs * 2);
+      }
+      return;
+    }
+
+    // Fallback to in-memory
     const userRequests = this.requests.get(userId) || [];
     const windowStart = now - this.windowMs;
-    
-    // Фильтруем старые запросы и добавляем новый
     const recentRequests = userRequests.filter(timestamp => timestamp > windowStart);
     recentRequests.push(now);
-    
     this.requests.set(userId, recentRequests);
   }
 
@@ -283,17 +310,20 @@ class RateLimiter {
    * @returns {number} - время до сброса в миллисекундах
    */
   getTimeUntilReset(userId) {
-    const userRequests = this.requests.get(userId);
-    
-    if (!userRequests || userRequests.length === 0) {
-      return 0;
+    if (this.db) {
+      const row = this.db.prepare(
+        'SELECT MIN(timestamp) as oldest FROM rate_limits WHERE user_id = ?'
+      ).get(userId);
+      if (!row || !row.oldest) return 0;
+      return Math.max(0, row.oldest + this.windowMs - Date.now());
     }
 
+    // Fallback to in-memory
+    const userRequests = this.requests.get(userId);
+    if (!userRequests || userRequests.length === 0) return 0;
     const now = Date.now();
     const oldestRequest = Math.min(...userRequests);
-    const resetTime = oldestRequest + this.windowMs;
-    
-    return Math.max(0, resetTime - now);
+    return Math.max(0, oldestRequest + this.windowMs - now);
   }
 
   /**
@@ -303,10 +333,8 @@ class RateLimiter {
   cleanup() {
     const now = Date.now();
     const windowStart = now - this.windowMs;
-    
     for (const [userId, timestamps] of this.requests.entries()) {
       const recentRequests = timestamps.filter(timestamp => timestamp > windowStart);
-      
       if (recentRequests.length === 0) {
         this.requests.delete(userId);
       } else {

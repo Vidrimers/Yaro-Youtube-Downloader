@@ -24,29 +24,61 @@ const BAN_LABELS = {
 };
 
 class BanManager {
-  constructor() {
-    // Map<userId, { until: timestamp|null, username: string }>
+  constructor(db) {
+    this.db = db;
+    // Cache in memory for fast lookups
     this.bans = new Map();
   }
 
   async load() {
+    if (!this.db) {
+      Logger.warn('BanManager: no DB, using empty bans');
+      return;
+    }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS bans (
+        user_id INTEGER PRIMARY KEY,
+        until INTEGER,
+        username TEXT,
+        reason TEXT
+      )
+    `);
+
+    // Миграция из bans.json если таблица пуста
+    const count = this.db.prepare('SELECT COUNT(*) as c FROM bans').get().c;
+    if (count === 0) {
+      await this.migrateFromJson();
+    }
+
+    // Загружаем в кэш
+    const rows = this.db.prepare('SELECT * FROM bans').all();
+    this.bans = new Map(rows.map(r => [r.user_id, { until: r.until, username: r.username, reason: r.reason }]));
+    Logger.info('Bans loaded from DB', { count: this.bans.size });
+  }
+
+  async migrateFromJson() {
     try {
       const data = await fs.readFile(BANS_FILE, 'utf8');
       const json = JSON.parse(data);
-      this.bans = new Map(Object.entries(json).map(([id, info]) => [parseInt(id), info]));
-      Logger.info('Bans loaded', { count: this.bans.size });
+      const insert = this.db.prepare('INSERT OR IGNORE INTO bans (user_id, until, username, reason) VALUES (?, ?, ?, ?)');
+
+      const migrate = this.db.transaction(() => {
+        for (const [userId, info] of Object.entries(json)) {
+          insert.run(parseInt(userId), info.until, info.username || null, info.reason || null);
+        }
+      });
+      migrate();
+
+      Logger.info('Migrated bans from JSON to SQLite', { count: Object.keys(json).length });
     } catch {
-      // Файл не существует — начинаем с пустого списка
-      this.bans = new Map();
+      // bans.json не существует — нормально
     }
   }
 
   async save() {
-    const obj = {};
-    for (const [userId, info] of this.bans) {
-      obj[userId] = info;
-    }
-    await fs.writeFile(BANS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+    // With SQLite each operation is immediate, no need for explicit save
+    // But keep method for compatibility
   }
 
   /**
@@ -65,7 +97,9 @@ class BanManager {
 
     // Бан истёк — удаляем
     this.bans.delete(userId);
-    this.save().catch(() => {});
+    if (this.db) {
+      this.db.prepare('DELETE FROM bans WHERE user_id = ?').run(userId);
+    }
     return { banned: false, justUnbanned: true };
   }
 
@@ -80,7 +114,12 @@ class BanManager {
     const ms = BAN_DURATIONS[duration];
     const until = ms === null ? null : Date.now() + ms;
     this.bans.set(userId, { until, username, reason });
-    await this.save();
+
+    if (this.db) {
+      this.db.prepare('INSERT OR REPLACE INTO bans (user_id, until, username, reason) VALUES (?, ?, ?, ?)')
+        .run(userId, until, username, reason);
+    }
+
     Logger.info('User banned', { userId, username, duration, until, reason });
   }
 
@@ -89,7 +128,9 @@ class BanManager {
    */
   async unban(userId) {
     this.bans.delete(userId);
-    await this.save();
+    if (this.db) {
+      this.db.prepare('DELETE FROM bans WHERE user_id = ?').run(userId);
+    }
     Logger.info('User unbanned', { userId });
   }
 

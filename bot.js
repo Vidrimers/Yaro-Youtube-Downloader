@@ -1,5 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const path = require('path');
+const Database = require('better-sqlite3');
 const config = require('./config/config');
 const VideoProcessor = require('./src/ytdlp');
 const TelegramHelper = require('./src/telegram');
@@ -47,9 +48,15 @@ class BotController {
     });
     this.cryptoApi = new CryptoApiClient(config);
     this.jokeManager = new JokeManager(this.telegramApi);
+
+    // Shared SQLite database
+    this.db = new Database(path.resolve('stats.db'));
+    this.db.pragma('journal_mode = WAL');
+
     this.rateLimiter = new RateLimiter(
       config.RATE_LIMIT_MAX_REQUESTS,
-      config.RATE_LIMIT_WINDOW_MS
+      config.RATE_LIMIT_WINDOW_MS,
+      this.db
     );
     
     // Состояния ожидания сообщения от пользователя для связи с админом
@@ -63,10 +70,10 @@ class BotController {
     this.pendingTrims = new Map();
 
     // Менеджер банов
-    this.banManager = new BanManager();
+    this.banManager = new BanManager(this.db);
 
     // Статистика
-    this.statsManager = new StatsManager();
+    this.statsManager = new StatsManager(this.db);
 
     // Кэш username пользователей для системы банов
     this.usernames = new Map();
