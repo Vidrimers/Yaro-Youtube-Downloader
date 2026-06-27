@@ -70,6 +70,9 @@ class Config {
     
     // Админ
     this.TELEGRAM_ADMIN_ID = null; // ID админа для доступа к балансам
+    
+    // Instagram cookies
+    this.INSTAGRAM_COOKIES_FILE = null; // Путь к cookies.txt для Instagram
   }
 
   /**
@@ -288,6 +291,11 @@ class Config {
         this.TELEGRAM_ADMIN_ID = adminId;
       }
     }
+    
+    // Instagram cookies
+    if (process.env.INSTAGRAM_COOKIES_FILE) {
+      this.INSTAGRAM_COOKIES_FILE = process.env.INSTAGRAM_COOKIES_FILE;
+    }
   }
 
   /**
@@ -386,7 +394,8 @@ class Config {
       TON_API_URL: this.TON_API_URL,
       TRON_API_URL: this.TRON_API_URL,
       TRON_API_KEY: this.TRON_API_KEY,
-      TELEGRAM_ADMIN_ID: this.TELEGRAM_ADMIN_ID
+      TELEGRAM_ADMIN_ID: this.TELEGRAM_ADMIN_ID,
+      INSTAGRAM_COOKIES_FILE: this.INSTAGRAM_COOKIES_FILE
     };
   }
 }

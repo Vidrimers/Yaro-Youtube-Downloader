@@ -78,11 +78,16 @@ class VideoProcessor {
   /**
    * Получает полную информацию о видео
    * @param {string} url - YouTube URL
+   * @param {string} [cookiesFile] - путь к cookies.txt (опционально)
    * @returns {Promise<Object>} - объект с информацией о видео
    * @throws {Error} - если не удалось получить информацию
    */
-  async getVideoInfo(url) {
-    const args = ['-j', '--no-warnings', url];
+  async getVideoInfo(url, cookiesFile) {
+    const args = ['-j', '--no-warnings'];
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    }
+    args.push(url);
     const timeout = config.YTDLP_METADATA_TIMEOUT;
     
     try {
@@ -108,6 +113,14 @@ class VideoProcessor {
             error.stderr.includes('Private video') ||
             error.stderr.includes('This video is not available')) {
           throw new Error('VIDEO_UNAVAILABLE');
+        }
+        
+        // Instagram-specific errors
+        if (error.stderr.includes('Instagram') && 
+            (error.stderr.includes('empty media response') || 
+             error.stderr.includes('logged-in') ||
+             error.stderr.includes('cookies'))) {
+          throw new Error('INSTAGRAM_LOGIN_REQUIRED');
         }
         
         if (error.stderr.includes('network') || 
@@ -268,14 +281,18 @@ class VideoProcessor {
    * @param {string} url - Instagram URL
    * @param {string} outputPath - путь для сохранения файла
    * @param {number} timeout - timeout в миллисекундах
+   * @param {string} [cookiesFile] - путь к cookies.txt (опционально)
    * @returns {Promise<string>} - путь к скачанному файлу
    */
-  async downloadInstagram(url, outputPath, timeout = 300000) {
+  async downloadInstagram(url, outputPath, timeout = 300000, cookiesFile) {
     const args = [
       '-o', outputPath,
-      '--no-warnings',
-      url
+      '--no-warnings'
     ];
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    }
+    args.push(url);
     
     try {
       await this.executeYtDlp(args, timeout);

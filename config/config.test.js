@@ -273,7 +273,8 @@ describe('Config Module', () => {
         TON_API_URL: "https://toncenter.com/api/v2",
         TRON_API_KEY: null,
         TRON_API_URL: "https://api.trongrid.io",
-        USDT_ADDRESS: null
+        USDT_ADDRESS: null,
+        INSTAGRAM_COOKIES_FILE: null
       });
     });
   });

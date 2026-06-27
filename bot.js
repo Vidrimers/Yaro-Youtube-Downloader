@@ -1571,7 +1571,7 @@ class BotController {
     
     try {
       // Получаем информацию о видео
-      const videoInfo = await this.videoProcessor.getVideoInfo(url);
+      const videoInfo = await this.videoProcessor.getVideoInfo(url, this.config.INSTAGRAM_COOKIES_FILE);
       
       if (!videoInfo) {
         await this.telegramHelper.sendError(chatId, 'video_unavailable');
@@ -1587,7 +1587,7 @@ class BotController {
       
       // Скачиваем Instagram контент
       Logger.info('Downloading Instagram content', { userId, url, videoId });
-      await this.videoProcessor.downloadInstagram(url, outputPath, this.config.DOWNLOAD_TIMEOUT);
+      await this.videoProcessor.downloadInstagram(url, outputPath, this.config.DOWNLOAD_TIMEOUT, this.config.INSTAGRAM_COOKIES_FILE);
       
       // Проверяем размер файла
       const fileSize = await this.fileManager.getFileSize(outputPath);
