@@ -185,34 +185,35 @@ class ExtensionAPI {
       const isCombined = this.videoProcessor.isCombinedFormat(format);
       const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
 
-      if (isCombined) {
-        try {
-          await this.videoProcessor.downloadVideo(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
-        } catch (dlError) {
-          Logger.warn('Combined format download failed, trying separate streams', { error: dlError.message });
-          // Fallback: download video+audio separately and merge
-          const audioFormat = this.videoProcessor.getBestAudioFormat(videoInfo.formats);
-          if (audioFormat) {
-            await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
-            await this.videoProcessor.downloadStream(normalizedUrl, audioFormat.format_id, audioPath, 300000, cookiesFile);
-            await this.fileManager.mergeVideoAudio(videoPath, audioPath, mergedPath);
-          } else {
-            throw dlError;
-          }
-        }
-      } else {
-        await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
-
-        const audioFormat = this.videoProcessor.getBestAudioFormat(videoInfo.formats);
-        if (audioFormat) {
-          await this.videoProcessor.downloadStream(normalizedUrl, audioFormat.format_id, audioPath, 300000, cookiesFile);
-          await this.fileManager.mergeVideoAudio(videoPath, audioPath, mergedPath);
-        } else {
-          fs.copyFileSync(videoPath, mergedPath);
-        }
+      // Use yt-dlp's merge for all formats to avoid 403 on video-only streams
+      // Let yt-dlp handle format selection and merging internally
+      try {
+        const mergeArgs = [
+          '-f', `${format.format_id}+bestaudio/best`,
+          '--merge-output-format', 'mp4',
+          '-o', videoPath,
+          '--no-warnings'
+        ];
+        if (cookiesFile) mergeArgs.push('--cookies', cookiesFile);
+        mergeArgs.push(normalizedUrl);
+        
+        await this.videoProcessor.executeYtDlp(mergeArgs, 300000);
+      } catch (dlError) {
+        Logger.warn('Format download failed, trying best available', { error: dlError.message, formatId: format.format_id });
+        // Fallback: let yt-dlp choose the best format
+        const fallbackArgs = [
+          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+          '--merge-output-format', 'mp4',
+          '-o', videoPath,
+          '--no-warnings'
+        ];
+        if (cookiesFile) fallbackArgs.push('--cookies', cookiesFile);
+        fallbackArgs.push(normalizedUrl);
+        
+        await this.videoProcessor.executeYtDlp(fallbackArgs, 300000);
       }
 
-      const sourceFile = (isCombined || !fs.existsSync(mergedPath)) ? videoPath : mergedPath;
+      const sourceFile = videoPath;
       let finalFile = sourceFile;
 
       if (sponsorSegments && sponsorSegments.length > 0) {
