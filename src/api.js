@@ -170,15 +170,16 @@ class ExtensionAPI {
       }
 
       const isCombined = this.videoProcessor.isCombinedFormat(format);
+      const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
 
       if (isCombined) {
-        await this.videoProcessor.downloadVideo(normalizedUrl, format.format_id, videoPath);
+        await this.videoProcessor.downloadVideo(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
       } else {
-        await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath);
+        await this.videoProcessor.downloadStream(normalizedUrl, format.format_id, videoPath, 300000, cookiesFile);
 
         const audioFormat = this.videoProcessor.getBestAudioFormat(videoInfo.formats);
         if (audioFormat) {
-          await this.videoProcessor.downloadStream(normalizedUrl, audioFormat.format_id, audioPath);
+          await this.videoProcessor.downloadStream(normalizedUrl, audioFormat.format_id, audioPath, 300000, cookiesFile);
           await this.fileManager.mergeVideoAudio(videoPath, audioPath, mergedPath);
         } else {
           fs.copyFileSync(videoPath, mergedPath);
