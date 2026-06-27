@@ -191,7 +191,6 @@ class ExtensionAPI {
         const mergeArgs = [
           '-f', `${format.format_id}+bestaudio/best`,
           '--merge-output-format', 'mp4',
-          '--extractor-args', 'youtube:player_client=web_creator',
           '-o', videoPath,
           '--no-warnings'
         ];
@@ -205,7 +204,6 @@ class ExtensionAPI {
         const fallbackArgs = [
           '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
           '--merge-output-format', 'mp4',
-          '--extractor-args', 'youtube:player_client=web_creator',
           '-o', videoPath,
           '--no-warnings'
         ];
