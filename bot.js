@@ -1286,6 +1286,14 @@ class BotController {
       if (error.message === 'VIDEO_FORMAT_NOT_FOUND' || error.message === 'AUDIO_FORMAT_NOT_FOUND') {
         Logger.info('Format not available, trying fallback to combined format', { userId });
         
+        // При обрезке не отправляем прямую ссылку — обрезка невозможна
+        if (trimStart !== null || trimEnd !== null) {
+          await this.telegramApi.sendMessage(chatId, 
+            `❌ Выбранный формат видео недоступен для скачивания. Обрезка невозможна.\nПопробуйте другое качество.`
+          );
+          return;
+        }
+        
         try {
           // Пытаемся найти комбинированный формат того же разрешения
           const targetHeight = format.height;
@@ -1345,6 +1353,14 @@ class BotController {
       
       // Если ошибка 413 (файл слишком большой для Telegram), пытаемся отправить прямую ссылку
       if (error.message && error.message.includes('413')) {
+        // При обрезке не отправляем прямую ссылку — обрезка невозможна
+        if (trimStart !== null || trimEnd !== null) {
+          await this.telegramApi.sendMessage(chatId, 
+            `❌ Файл слишком большой для Telegram. Обрезка невозможна для этого формата.\nПопробуйте качество пониже.`
+          );
+          return;
+        }
+        
         Logger.info('File upload failed with 413, trying direct URL fallback', { userId });
         
         try {
