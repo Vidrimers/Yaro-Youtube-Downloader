@@ -171,11 +171,11 @@ class BotController {
       try {
         await this.bot.setMyCommands(
           [
+            { command: 'admin', description: '🛠 Панель администратора' },
             { command: 'start', description: '🏠 Главное меню' },
             { command: 'help', description: '❓ Помощь' },
             { command: 'donate', description: '💝 Донатная' },
             { command: 'contact', description: '✍️ Написать администратору' },
-            { command: 'admin', description: '🛠 Панель администратора' },
           ],
           { scope: { type: 'chat', chat_id: this.config.TELEGRAM_ADMIN_ID } }
         );
