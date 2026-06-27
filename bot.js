@@ -2293,6 +2293,7 @@ class BotController {
 
   /**
    * Трекает попытки доступа к админ-командам и банит после 3-х
+   * С каждым баном срок увеличивается: 1ч → 1д → 1м → навсегда
    * @param {number} chatId - ID чата
    * @param {number} userId - ID пользователя
    * @param {string} username - имя пользователя
@@ -2301,8 +2302,10 @@ class BotController {
   async trackAdminAccessAttempt(chatId, userId, username, command) {
     const now = Date.now();
     const MAX_ATTEMPTS = 3;
-    const BAN_DURATION = '1h';
     const WINDOW_MS = 30 * 60 * 1000; // 30 минут — окно для подсчёта попыток
+
+    // Порядок эскалации банов
+    const BAN_ESCALATION = ['1h', '1d', '1m', 'forever'];
 
     const attempt = this.adminAccessAttempts.get(userId);
 
@@ -2316,31 +2319,39 @@ class BotController {
     attempt.count++;
 
     if (attempt.count >= MAX_ATTEMPTS) {
-      // Авто-бан на 1 час
-      await this.banManager.ban(userId, username, BAN_DURATION, `Авто-бан: ${attempt.count} попыток доступа к ${command}`);
-      this.adminAccessAttempts.delete(userId);
+      // Определяем количество предыдущих банов для эскалации
+      const banHistory = attempt.banCount || 0;
+      const durationIndex = Math.min(banHistory, BAN_ESCALATION.length - 1);
+      const duration = BAN_ESCALATION[durationIndex];
+      const label = BAN_LABELS[duration];
 
-      // Уведомляем пользователя
+      await this.banManager.ban(userId, username, duration, `Авто-бан: ${attempt.count} попыток доступа к ${command}`);
+      this.adminAccessAttempts.set(userId, { count: 0, firstAttempt: now, banCount: banHistory + 1 });
+
+      const isLastBan = duration === 'forever';
+      const nextBanText = isLastBan
+        ? ''
+        : `\n\n⚠️ Следующий бан — ${BAN_ESCALATION[Math.min(durationIndex + 1, BAN_ESCALATION.length - 1)] === 'forever' ? 'навсегда' : BAN_LABELS[BAN_ESCALATION[Math.min(durationIndex + 1, BAN_ESCALATION.length - 1)]]}.`;
+
       await this.telegramApi.sendMessage(chatId,
-        '🚫 <b>Вы заблокированы на 1 час.</b>\n\n' +
-        'Слишком много попыток доступа к админ-командам.\n\n' +
-        '⚠️ Следующий бан будет дольше.'
+        `🚫 <b>Вы заблокированы на ${label}.</b>\n\n` +
+        'Слишком много попыток доступа к админ-командам.' +
+        nextBanText
       , { parse_mode: 'HTML' });
 
-      // Уведомляем админа
       if (this.config.TELEGRAM_ADMIN_ID) {
         await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
           `🚫 <b>Авто-бан!</b>\n\n` +
           `👤 @${username} (ID: <code>${userId}</code>)\n` +
           `📝 ${attempt.count} попыток доступа к ${command}\n` +
-          `⏱ Забанен на 1 час`,
+          `⏱ Забанен на ${label}\n` +
+          `🔄 Всего банов: ${banHistory + 1}`,
           { parse_mode: 'HTML' }
         );
       }
 
-      Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: attempt.count, command });
+      Logger.info('Auto-banned user for admin access attempts', { userId, username, attempts: attempt.count, duration, banCount: banHistory + 1, command });
     } else {
-      // Предупреждаем о оставшихся попытках
       const remaining = MAX_ATTEMPTS - attempt.count;
       await this.telegramApi.sendMessage(chatId,
         `⚠️ <b>Осталось попыток: ${remaining}</b>\n\n` +
