@@ -1075,9 +1075,6 @@ class BotController {
       }
 
       // Нет спонсорских блоков, скачиваем как обычно
-      // Проверяем, является ли формат комбинированным
-      const isCombined = this.videoProcessor.isCombinedFormat(format);
-      
       // Записываем статистику
       this.statsManager.recordDownload({
         source: 'bot',
@@ -1090,16 +1087,8 @@ class BotController {
         userId: String(userId)
       });
       
-      // Проверяем, нужно ли объединять видео и аудио
-      if (!isCombined) {
-        // Формат раздельный - нужно скачать и объединить
-        await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
-      } else {
-        // Обычная прямая ссылка
-        await this.telegramApi.sendChatAction(chatId, 'typing');
-        const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id, this.config.YOUTUBE_COOKIES_FILE);
-        await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
-      }
+      // Скачиваем через processVideoDownload — yt-dlp merge обходит 403 на video-only потоках
+      await this.processVideoDownload(chatId, userId, url, videoInfo, format, quality, false);
       
     } catch (error) {
       Logger.error('Error handling callback query', error, { userId, username, callbackData });
@@ -1161,123 +1150,65 @@ class BotController {
    */
   async processVideoDownload(chatId, userId, url, videoInfo, format, quality, removeSponsorBlocks = false, sponsorSegments = null, trimStart = null, trimEnd = null) {
     let statusMessage = null;
-    let videoPath = null;
-    let audioPath = null;
     let outputPath = null;
     let finalOutputPath = null;
-    let fileUsedByServer = false; // Флаг: файл используется сервером, не удалять
-    
+    let fileUsedByServer = false;
+
     try {
-      // Отправляем статус
       statusMessage = await this.telegramHelper.sendDownloadStatus(chatId, 'downloading');
-      
-      // Запускаем отправку шуток во время ожидания
       this.jokeManager.startJokeInterval(chatId, 20);
-      
-      // Генерируем пути для файлов
-      videoPath = this.fileManager.generateFilePath(videoInfo.id, 'video.mp4');
-      audioPath = this.fileManager.generateFilePath(videoInfo.id, 'audio.m4a');
+
       outputPath = this.fileManager.generateFilePath(videoInfo.id, 'mp4');
-      
-      // Скачиваем видео поток с fallback на другие форматы того же разрешения
-      Logger.info('Downloading video stream', { userId, formatId: format.format_id });
-      
-      let videoDownloaded = false;
-      let lastVideoError = null;
-      
-      // Получаем все видео форматы того же разрешения для fallback
-      const targetHeight = format.height;
-      const sameResolutionFormats = videoInfo.formats.filter(f =>
-        f.vcodec && f.vcodec !== 'none' &&
-        (!f.acodec || f.acodec === 'none') &&
-        f.height === targetHeight
-      ).sort((a, b) => {
-        // Приоритет: mp4 > webm, меньший битрейт лучше для скорости
-        const codecPriorityA = a.ext === 'mp4' ? 0 : 1;
-        const codecPriorityB = b.ext === 'mp4' ? 0 : 1;
-        if (codecPriorityA !== codecPriorityB) {
-          return codecPriorityA - codecPriorityB;
-        }
-        return (a.tbr || 0) - (b.tbr || 0);
-      });
-      
-      // Начинаем с выбранного формата, потом пробуем остальные
-      const formatsToTry = [format, ...sameResolutionFormats.filter(f => f.format_id !== format.format_id)];
-      
-      for (const videoFmt of formatsToTry) {
+
+      // Используем yt-dlp merge для скачивания — он сам выбирает и объединяет видео+аудио.
+      // Это обходит 403 на video-only потоках, потому что yt-dlp берёт URL через свой пайплайн.
+      Logger.info('Downloading with yt-dlp merge', { userId, formatId: format.format_id });
+
+      const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
+
+      // Основная попытка: конкретный формат + лучшее аудио
+      let downloaded = false;
+      let lastError = null;
+
+      const formatsToTry = [
+        `${format.format_id}+bestaudio/best`,
+        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+      ];
+
+      for (const fmt of formatsToTry) {
         try {
-          await this.videoProcessor.downloadStream(url, videoFmt.format_id, videoPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
-          Logger.info('Video downloaded successfully', { userId, formatId: videoFmt.format_id });
-          videoDownloaded = true;
+          const args = [
+            '-f', fmt,
+            '--merge-output-format', 'mp4',
+            '-o', outputPath,
+            '--no-warnings'
+          ];
+          if (cookiesFile) args.push('--cookies', cookiesFile);
+          args.push(url);
+
+          await this.videoProcessor.executeYtDlp(args, this.config.DOWNLOAD_TIMEOUT);
+          Logger.info('Download completed via yt-dlp merge', { userId, format: fmt });
+          downloaded = true;
           break;
-        } catch (videoError) {
-          Logger.warn('Video format failed, trying next', { 
-            userId, 
-            formatId: videoFmt.format_id, 
-            error: videoError.message 
+        } catch (dlError) {
+          Logger.warn('yt-dlp merge format failed, trying next', {
+            userId,
+            format: fmt,
+            error: dlError.message
           });
-          lastVideoError = videoError;
+          lastError = dlError;
           continue;
         }
       }
-      
-      if (!videoDownloaded) {
-        Logger.error('All video formats failed', lastVideoError, { userId });
+
+      if (!downloaded) {
+        Logger.error('All yt-dlp merge attempts failed', lastError, { userId });
         throw new Error('VIDEO_FORMAT_NOT_FOUND');
       }
-      
-      // Обновляем статус
-      await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'downloading_audio');
-      
-      // Получаем лучший аудио формат
-      const audioFormat = this.videoProcessor.getBestAudioFormat(videoInfo.formats);
-      if (!audioFormat) {
-        throw new Error('AUDIO_FORMAT_NOT_FOUND');
-      }
-      
-      // Скачиваем аудио поток с fallback на другие форматы
-      Logger.info('Downloading audio stream', { userId, formatId: audioFormat.format_id });
-      
-      let audioDownloaded = false;
-      let lastAudioError = null;
-      
-      // Получаем все доступные аудио форматы для fallback
-      const allAudioFormats = videoInfo.formats.filter(f => 
-        f.acodec && f.acodec !== 'none' && 
-        (!f.vcodec || f.vcodec === 'none')
-      ).sort((a, b) => (b.abr || 0) - (a.abr || 0)); // Сортируем по качеству
-      
-      for (const audioFmt of allAudioFormats) {
-        try {
-          await this.videoProcessor.downloadStream(url, audioFmt.format_id, audioPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
-          Logger.info('Audio downloaded successfully', { userId, formatId: audioFmt.format_id });
-          audioDownloaded = true;
-          break;
-        } catch (audioError) {
-          Logger.warn('Audio format failed, trying next', { 
-            userId, 
-            formatId: audioFmt.format_id, 
-            error: audioError.message 
-          });
-          lastAudioError = audioError;
-          continue;
-        }
-      }
-      
-      if (!audioDownloaded) {
-        Logger.error('All audio formats failed', lastAudioError, { userId });
-        throw new Error('AUDIO_FORMAT_NOT_FOUND');
-      }
-      
-      // Обновляем статус
-      await this.telegramHelper.updateDownloadStatus(chatId, statusMessage.message_id, 'merging');
-      
-      // Объединяем видео и аудио
-      Logger.info('Merging video and audio', { userId, videoId: videoInfo.id });
-      await this.fileManager.mergeVideoAudio(videoPath, audioPath, outputPath);
+
+      finalOutputPath = outputPath;
       
       // Если нужно удалить спонсорские блоки, обрабатываем файл
-      finalOutputPath = outputPath;
       if (removeSponsorBlocks && sponsorSegments && sponsorSegments.length > 0) {
         Logger.info('Removing sponsor segments', { userId, segmentsCount: sponsorSegments.length });
         
@@ -1554,7 +1485,7 @@ class BotController {
       }
       
       // Обработка специфических ошибок
-      if (error.message === 'VIDEO_FORMAT_NOT_FOUND' || error.message === 'AUDIO_FORMAT_NOT_FOUND') {
+      if (error.message === 'VIDEO_FORMAT_NOT_FOUND') {
         Logger.info('Format not available, trying fallback to combined format', { userId });
         
         // При обрезке не отправляем прямую ссылку — обрезка невозможна
@@ -1566,50 +1497,33 @@ class BotController {
         }
         
         try {
-          // Пытаемся найти комбинированный формат того же разрешения
-          const targetHeight = format.height;
-          const combinedFormats = videoInfo.formats.filter(f =>
-            f.vcodec && f.vcodec !== 'none' &&
-            f.acodec && f.acodec !== 'none' &&
-            f.height === targetHeight
-          ).sort((a, b) => (b.tbr || 0) - (a.tbr || 0));
+          // Fallback: пробуем bestvideo+bestaudio через yt-dlp merge
+          const combinedOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'fallback.mp4');
+          const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
+          const fallbackArgs = [
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            '--merge-output-format', 'mp4',
+            '-o', combinedOutputPath,
+            '--no-warnings'
+          ];
+          if (cookiesFile) fallbackArgs.push('--cookies', cookiesFile);
+          fallbackArgs.push(url);
           
-          if (combinedFormats.length > 0) {
-            Logger.info('Found combined format, trying direct download', { 
-              userId, 
-              formatId: combinedFormats[0].format_id 
-            });
-            
-            // Пытаемся скачать комбинированный формат
-            const combinedOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'mp4');
-            await this.videoProcessor.downloadVideo(url, combinedFormats[0].format_id, combinedOutputPath, this.config.DOWNLOAD_TIMEOUT, this.config.YOUTUBE_COOKIES_FILE);
-            
-            const fileSize = await this.fileManager.getFileSize(combinedOutputPath);
-            
-            // Проверяем размер и отправляем
-            if (fileSize > this.config.MAX_FILE_SIZE) {
-              await this.fileManager.deleteFiles([combinedOutputPath]);
-              throw new Error('FILE_TOO_LARGE');
-            }
-            
-            await this.telegramHelper.sendVideoFile(chatId, combinedOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.videoProcessor.executeYtDlp(fallbackArgs, this.config.DOWNLOAD_TIMEOUT);
+          
+          const fileSize = await this.fileManager.getFileSize(combinedOutputPath);
+          
+          // Проверяем размер и отправляем
+          if (fileSize > this.config.MAX_FILE_SIZE) {
             await this.fileManager.deleteFiles([combinedOutputPath]);
-            
-            Logger.info('Successfully sent video using combined format fallback', { userId });
-            return;
-          } else {
-            // Если нет комбинированных форматов, пытаемся отправить прямую ссылку
-            Logger.info('No combined formats available, trying direct URL', { userId });
-            
-            const directUrl = await this.videoProcessor.getDirectUrl(url, format.format_id, this.config.YOUTUBE_COOKIES_FILE);
-            await this.telegramHelper.sendDirectLink(chatId, directUrl, quality, format.format_id, url);
-            
-            await this.telegramApi.sendMessage(chatId, 
-              `ℹ️ Выбранный формат временно недоступен. Отправляю прямую ссылку для скачивания.`
-            );
-            
-            return;
+            throw new Error('FILE_TOO_LARGE');
           }
+          
+          await this.telegramHelper.sendVideoFile(chatId, combinedOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.fileManager.deleteFiles([combinedOutputPath]);
+          
+          Logger.info('Successfully sent video using best available fallback', { userId });
+          return;
         } catch (fallbackError) {
           Logger.error('All fallback methods failed', fallbackError, { userId });
           
@@ -1735,20 +1649,10 @@ class BotController {
       
       throw error;
     } finally {
-      // Останавливаем отправку шуток
       this.jokeManager.stopJokeInterval(chatId);
-      
-      // Очищаем временные файлы
-      // Если файл используется сервером, не удаляем outputPath (он удалится автоматически по TTL)
-      if (!fileUsedByServer) {
-        if (videoPath || audioPath || finalOutputPath) {
-          await this.fileManager.deleteFiles([videoPath, audioPath, finalOutputPath].filter(Boolean));
-        }
-      } else {
-        // Если файл на сервере, удаляем только промежуточные файлы (если они еще не удалены)
-        if (videoPath || audioPath) {
-          await this.fileManager.deleteFiles([videoPath, audioPath].filter(Boolean));
-        }
+
+      if (!fileUsedByServer && finalOutputPath) {
+        await this.fileManager.deleteFile(finalOutputPath).catch(() => {});
       }
     }
   }
