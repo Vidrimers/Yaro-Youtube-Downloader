@@ -103,19 +103,19 @@ class TelegramHelper {
    * @returns {Promise<void>}
    */
   async sendVideoFile(chatId, filePath, videoInfo, quality, uploadTimeout = 600000, maxRetries = 2) {
-    const caption = `📹 ${videoInfo.title}\n\n` +
+    const caption = `📹 ${this.escapeHtml(videoInfo.title)}\n\n` +
                    `Качество: ${quality}\n` +
                    `⏱ Длительность: ${Formatter.formatDuration(videoInfo.duration || 0)}`;
 
     let lastError = null;
-    
+
     // Пробуем загрузить файл с retry логикой
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.bot.sendVideo(chatId, filePath, {
           caption: caption,
           supports_streaming: true,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
           timeout: uploadTimeout,
           disable_notification: false
         });
@@ -456,6 +456,17 @@ class TelegramHelper {
   escapeMarkdown(text) {
     if (!text) return '';
     return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  }
+
+  /**
+   * Экранирует HTML-спецсимволы
+   * @private
+   * @param {string} text - текст для экранирования
+   * @returns {string} - экранированный текст
+   */
+  escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   /**

@@ -1667,6 +1667,7 @@ class BotController {
   async processInstagramDownload(chatId, userId, url, username) {
     let statusMessage = null;
     let outputPath = null;
+    let compressedPath = null;
     let fileUsedByServer = false;
     
     try {
@@ -1698,7 +1699,6 @@ class BotController {
       const TELEGRAM_TRY_LIMIT = this.config.TELEGRAM_UPLOAD_LIMIT; // 500MB
 
       let sendFilePath = outputPath;
-      let compressedPath = null;
 
       // Если файл больше 50 МБ — сжимаем перед отправкой
       if (fileSize > TELEGRAM_FILE_LIMIT) {
