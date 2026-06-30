@@ -440,11 +440,11 @@ class FileManager {
         '-c:v', 'libx264',
         '-b:v', `${bitrate}k`,
         '-passlogfile', logPrefix,
-        '-pass', isPass1 ? '1' : '2',
-        '-an'
+        '-pass', isPass1 ? '1' : '2'
       ];
 
       if (isPass1) {
+        args.push('-an');
         args.push('-f', 'null');
         args.push(process.platform === 'win32' ? 'NUL' : '/dev/null');
       } else {
