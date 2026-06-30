@@ -183,8 +183,8 @@ class BotController {
     
     // Обработчик текстовых сообщений (не команд)
     this.bot.on('message', (msg) => {
-      // Если админ загружает куки — обрабатываем документ
-      if (this.pendingCookiesUpload && msg.document && msg.from.id === this.config.TELEGRAM_ADMIN_ID) {
+      // Если админ загружает куки (не в режиме переименования) — обрабатываем документ
+      if (this.pendingCookiesUpload && !this.pendingCookiesUpload.startsWith('rename_') && msg.document && msg.from.id === this.config.TELEGRAM_ADMIN_ID) {
         this.handleCookiesUpload(msg.chat.id, msg.document, this.pendingCookiesUpload);
         return;
       }
@@ -521,9 +521,25 @@ class BotController {
         await this.telegramApi.sendMessage(chatId, 'Ты разблокирован, больше не хуей если что ;-)');
       }
 
-      // Если админ в режиме загрузки куков и отправил текст (не документ)
+      // Если админ в режиме загрузки/переименования куков и отправил текст
       if (userId === this.config.TELEGRAM_ADMIN_ID && this.pendingCookiesUpload) {
-        await this.telegramApi.sendMessage(chatId, '⚠️ Отправьте файл cookies.txt или /cancel для отмены.');
+        if (this.pendingCookiesUpload.startsWith('rename_')) {
+          // Режим переименования
+          const parts = this.pendingCookiesUpload.split('_');
+          const platform = parts[1];
+          const slotIndex = parseInt(parts[2]);
+          this.pendingCookiesUpload = null;
+
+          const labels = await this.loadCookieLabels();
+          if (!labels[platform]) labels[platform] = {};
+          labels[platform][slotIndex] = text.trim().slice(0, 50);
+          await this.saveCookieLabels(labels);
+
+          const label = platform === 'instagram' ? 'Instagram' : 'YouTube';
+          await this.telegramApi.sendMessage(chatId, `✅ Слот ${label} #${slotIndex + 1} переименован в "${text.trim().slice(0, 50)}"`);
+          return;
+        }
+        await this.telegramApi.sendMessage(chatId, '⚠️ Отправьте файл .txt или /cancel для отмены.');
         return;
       }
 
@@ -1008,7 +1024,26 @@ class BotController {
         );
         return;
       }
-      
+
+      // Переименование слота куков: rename_cookie_instagram_0 ... rename_cookie_youtube_9
+      if (callbackData.startsWith('rename_cookie_')) {
+        if (this.config.TELEGRAM_ADMIN_ID && userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+          return;
+        }
+        const parts = callbackData.split('_');
+        const platform = parts[2]; // instagram или youtube
+        const slotIndex = parseInt(parts[3]);
+        this.pendingCookiesUpload = `rename_${platform}_${slotIndex}`;
+        const label = platform === 'instagram' ? 'Instagram' : 'YouTube';
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Введи имя' });
+        await this.telegramApi.sendMessage(chatId,
+          `✏️ Введите название для ${label} слот #${slotIndex + 1}:\n\nНапример: @vidrimers_main`,
+          { parse_mode: 'HTML' }
+        );
+        return;
+      }
+
       // Проверяем, является ли это SponsorBlock командой
       if (callbackData.startsWith('sb_')) {
         await this.handleSponsorBlockCallback(query);
@@ -2047,6 +2082,112 @@ class BotController {
   }
 
   /**
+   * Загружает метки слотов из JSON-файла
+   * @returns {Object} - { instagram: { 0: 'label', ... }, youtube: { ... } }
+   */
+  async loadCookieLabels() {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const labelsPath = path.resolve('cookie_labels.json');
+    try {
+      const data = await fs.readFile(labelsPath, 'utf8');
+      return JSON.parse(data);
+    } catch {
+      return { instagram: {}, youtube: {} };
+    }
+  }
+
+  /**
+   * Сохраняет метки слотов в JSON-файл
+   * @param {Object} labels
+   */
+  async saveCookieLabels(labels) {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const labelsPath = path.resolve('cookie_labels.json');
+    await fs.writeFile(labelsPath, JSON.stringify(labels, null, 2));
+  }
+
+  /**
+   * Определяет имя аккаунта по кукам
+   * @param {'instagram'|'youtube'} platform
+   * @param {number} slotIndex
+   * @returns {Promise<string|null>} - username или null
+   */
+  async detectAccountName(platform, slotIndex) {
+    const cookies = platform === 'instagram'
+      ? this.config.INSTAGRAM_COOKIES
+      : this.config.YOUTUBE_COOKIES;
+    const cookiesPath = cookies[slotIndex];
+    if (!cookiesPath) return null;
+
+    const fs = require('fs').promises;
+    try { await fs.access(cookiesPath); } catch { return null; }
+
+    try {
+      if (platform === 'instagram') {
+        // Извлекаем username из кук (ds_user_id → web_profile_info)
+        const data = await new Promise((resolve, reject) => {
+          const https = require('https');
+          const { spawn } = require('child_process');
+          // Используем yt-dlp чтобы получить info о профиле
+          const proc = spawn('yt-dlp', [
+            '--cookies', cookiesPath,
+            '-j', '--no-warnings',
+            'https://www.instagram.com/reel/DU4hf2mjLFI/'
+          ]);
+          let stdout = '';
+          proc.stdout.on('data', (d) => { stdout += d.toString(); });
+          let stderr = '';
+          proc.stderr.on('data', (d) => { stderr += d.toString(); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 20000);
+          proc.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code === 0) {
+              try {
+                const info = JSON.parse(stdout);
+                resolve(info.uploader || info.channel || null);
+              } catch { resolve(null); }
+            } else {
+              resolve(null);
+            }
+          });
+          proc.on('error', () => { clearTimeout(timeout); resolve(null); });
+        });
+        return data;
+      } else {
+        // YouTube — channel name из yt-dlp
+        const data = await new Promise((resolve) => {
+          const { spawn } = require('child_process');
+          const proc = spawn('yt-dlp', [
+            '--cookies', cookiesPath,
+            '-j', '--no-warnings',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+          ]);
+          let stdout = '';
+          proc.stdout.on('data', (d) => { stdout += d.toString(); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 20000);
+          proc.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code === 0) {
+              try {
+                const info = JSON.parse(stdout);
+                resolve(info.uploader || info.channel || null);
+              } catch { resolve(null); }
+            } else {
+              resolve(null);
+            }
+          });
+          proc.on('error', () => { clearTimeout(timeout); resolve(null); });
+        });
+        return data;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Находит формат видео с fallback механизмом
    * @private
    * @param {Array} formats - массив доступных форматов
@@ -2668,21 +2809,27 @@ class BotController {
     const callbackPrefix = platform === 'instagram' ? 'admin_cookies_insta_' : 'admin_cookies_yt_';
 
     const fs = require('fs').promises;
+    const labels = await this.loadCookieLabels();
+    const platformLabels = labels[platform] || {};
     const keyboard = { inline_keyboard: [] };
 
     for (let i = 0; i < cookies.length; i++) {
-      let status = '⬜'; // empty
+      let status = '⬜';
       try {
         await fs.access(cookies[i]);
-        status = working.has(i) ? '✅' : '❌'; // working or expired
+        status = working.has(i) ? '✅' : '❌';
       } catch {
-        status = '⬜'; // file doesn't exist
+        status = '⬜';
       }
+      const accountName = platformLabels[i] || '';
+      const nameStr = accountName ? ` — ${accountName}` : '';
       const isActive = i === currentIndex ? ' (активный)' : '';
-      keyboard.inline_keyboard.push([{
-        text: `${status} ${label} #${i + 1}${isActive}`,
-        callback_data: `${callbackPrefix}${i + 1}`
-      }]);
+
+      // Кнопка загрузки
+      keyboard.inline_keyboard.push([
+        { text: `${status} ${label} #${i + 1}${nameStr}${isActive}`, callback_data: `${callbackPrefix}${i + 1}` },
+        { text: '✏️', callback_data: `rename_cookie_${platform}_${i}` }
+      ]);
     }
 
     keyboard.inline_keyboard.push([{
@@ -2925,7 +3072,18 @@ class BotController {
           } else {
             this.youtubeWorkingSlots.add(slotIndex);
           }
-          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} слот #${slotIndex + 1} работают!`);
+
+          // Определяем имя аккаунта
+          const accountName = await this.detectAccountName(platform, slotIndex);
+          if (accountName) {
+            const labels = await this.loadCookieLabels();
+            if (!labels[platform]) labels[platform] = {};
+            labels[platform][slotIndex] = accountName;
+            await this.saveCookieLabels(labels);
+          }
+
+          const nameStr = accountName ? ` (${accountName})` : '';
+          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} слот #${slotIndex + 1} работают!${nameStr}`);
         } catch (e) {
           // Убираем из рабочих
           if (isInstagram) {
