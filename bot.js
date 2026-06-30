@@ -2109,7 +2109,7 @@ class BotController {
   }
 
   /**
-   * Определяет имя аккаунта по кукам
+   * Определяет имя залогиненного аккаунта по кукам
    * @param {'instagram'|'youtube'} platform
    * @param {number} slotIndex
    * @returns {Promise<string|null>} - username или null
@@ -2124,63 +2124,56 @@ class BotController {
     const fs = require('fs').promises;
     try { await fs.access(cookiesPath); } catch { return null; }
 
+    const { spawn } = require('child_process');
+
     try {
       if (platform === 'instagram') {
-        // Извлекаем username из кук (ds_user_id → web_profile_info)
-        const data = await new Promise((resolve, reject) => {
-          const https = require('https');
-          const { spawn } = require('child_process');
-          // Используем yt-dlp чтобы получить info о профиле
+        // Instagram: извлекаем username из API через куки
+        // Используем yt-dlp для получения profile info
+        const username = await new Promise((resolve) => {
           const proc = spawn('yt-dlp', [
             '--cookies', cookiesPath,
-            '-j', '--no-warnings',
+            '--print', 'uploader',
+            '--no-warnings',
             'https://www.instagram.com/reel/DU4hf2mjLFI/'
           ]);
           let stdout = '';
           proc.stdout.on('data', (d) => { stdout += d.toString(); });
-          let stderr = '';
-          proc.stderr.on('data', (d) => { stderr += d.toString(); });
-          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 20000);
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 15000);
           proc.on('close', (code) => {
             clearTimeout(timeout);
-            if (code === 0) {
-              try {
-                const info = JSON.parse(stdout);
-                resolve(info.uploader || info.channel || null);
-              } catch { resolve(null); }
-            } else {
-              resolve(null);
-            }
+            resolve(code === 0 ? stdout.trim() : null);
           });
           proc.on('error', () => { clearTimeout(timeout); resolve(null); });
         });
-        return data;
+        return username || null;
       } else {
-        // YouTube — channel name из yt-dlp
-        const data = await new Promise((resolve) => {
-          const { spawn } = require('child_process');
+        // YouTube: получаем имя канала через yt-dlp
+        // Пробуем получить подписки — первый канал это текущий пользователь
+        const channelName = await new Promise((resolve) => {
           const proc = spawn('yt-dlp', [
             '--cookies', cookiesPath,
-            '-j', '--no-warnings',
-            'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+            '--flat-playlist',
+            '--print', 'channel',
+            '--playlist-items', '1',
+            '--no-warnings',
+            'https://www.youtube.com/feed/channels'
           ]);
           let stdout = '';
           proc.stdout.on('data', (d) => { stdout += d.toString(); });
-          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 20000);
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 15000);
           proc.on('close', (code) => {
             clearTimeout(timeout);
-            if (code === 0) {
-              try {
-                const info = JSON.parse(stdout);
-                resolve(info.uploader || info.channel || null);
-              } catch { resolve(null); }
+            if (code === 0 && stdout.trim()) {
+              const lines = stdout.trim().split('\n');
+              resolve(lines[0] || null);
             } else {
               resolve(null);
             }
           });
           proc.on('error', () => { clearTimeout(timeout); resolve(null); });
         });
-        return data;
+        return channelName;
       }
     } catch {
       return null;
