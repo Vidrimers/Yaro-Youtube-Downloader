@@ -2818,10 +2818,13 @@ class BotController {
       const nameStr = accountName ? ` — ${accountName}` : '';
       const isActive = i === currentIndex ? ' (активный)' : '';
 
-      // Кнопка загрузки
+      // Кнопка загрузки — отдельная строка
       keyboard.inline_keyboard.push([
-        { text: `${status} ${label} #${i + 1}${nameStr}${isActive}`, callback_data: `${callbackPrefix}${i + 1}` },
-        { text: '✏️', callback_data: `rename_cookie_${platform}_${i}` }
+        { text: `${status} ${label} #${i + 1}${nameStr}${isActive}`, callback_data: `${callbackPrefix}${i + 1}` }
+      ]);
+      // Кнопка переименования — отдельная строка ниже
+      keyboard.inline_keyboard.push([
+        { text: '✏️ Переименовать', callback_data: `rename_cookie_${platform}_${i}` }
       ]);
     }
 
