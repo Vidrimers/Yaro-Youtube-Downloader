@@ -71,11 +71,13 @@ class Config {
     // Админ
     this.TELEGRAM_ADMIN_ID = null; // ID админа для доступа к балансам
     
-    // Instagram cookies
-    this.INSTAGRAM_COOKIES_FILE = null; // Путь к cookies.txt для Instagram
-    
-    // YouTube cookies
-    this.YOUTUBE_COOKIES_FILE = null; // Путь к cookies.txt для YouTube
+    // Instagram cookies (ротация: до 10 слотов)
+    this.INSTAGRAM_COOKIES = []; // Массив путей к cookies для Instagram
+    this.INSTAGRAM_COOKIES_FILE = null; // Обратная совместимость: текущий активный путь
+
+    // YouTube cookies (ротация: до 10 слотов)
+    this.YOUTUBE_COOKIES = []; // Массив путей к cookies для YouTube
+    this.YOUTUBE_COOKIES_FILE = null; // Обратная совместимость: текущий активный путь
     
     // Extension API
     this.API_SECRET_KEY = null; // Ключ для доступа к REST API расширения
@@ -298,15 +300,45 @@ class Config {
       }
     }
     
-    // Instagram cookies
-    if (process.env.INSTAGRAM_COOKIES_FILE) {
-      this.INSTAGRAM_COOKIES_FILE = process.env.INSTAGRAM_COOKIES_FILE;
+    // Instagram cookies — загружаем до 10 слотов
+    for (let i = 1; i <= 10; i++) {
+      const envKey = `INSTAGRAM_COOKIES_${i}`;
+      const envVal = process.env[envKey];
+      if (envVal && envVal.trim() !== '') {
+        this.INSTAGRAM_COOKIES.push(envVal.trim());
+      }
     }
-    
-    // YouTube cookies
-    if (process.env.YOUTUBE_COOKIES_FILE) {
-      this.YOUTUBE_COOKIES_FILE = process.env.YOUTUBE_COOKIES_FILE;
+    // Обратная совместимость: старый单一 путь → слот 1
+    if (this.INSTAGRAM_COOKIES.length === 0 && process.env.INSTAGRAM_COOKIES_FILE) {
+      this.INSTAGRAM_COOKIES.push(process.env.INSTAGRAM_COOKIES_FILE);
     }
+    // Дефолтные пути если ничего не настроено
+    if (this.INSTAGRAM_COOKIES.length === 0) {
+      for (let i = 1; i <= 10; i++) {
+        this.INSTAGRAM_COOKIES.push(`/home/ytdownload/instagram_cookies_${i}.txt`);
+      }
+    }
+    this.INSTAGRAM_COOKIES_FILE = this.INSTAGRAM_COOKIES[0] || null;
+
+    // YouTube cookies — загружаем до 10 слотов
+    for (let i = 1; i <= 10; i++) {
+      const envKey = `YOUTUBE_COOKIES_${i}`;
+      const envVal = process.env[envKey];
+      if (envVal && envVal.trim() !== '') {
+        this.YOUTUBE_COOKIES.push(envVal.trim());
+      }
+    }
+    // Обратная совместимость: старый单一 путь → слот 1
+    if (this.YOUTUBE_COOKIES.length === 0 && process.env.YOUTUBE_COOKIES_FILE) {
+      this.YOUTUBE_COOKIES.push(process.env.YOUTUBE_COOKIES_FILE);
+    }
+    // Дефолтные пути если ничего не настроено
+    if (this.YOUTUBE_COOKIES.length === 0) {
+      for (let i = 1; i <= 10; i++) {
+        this.YOUTUBE_COOKIES.push(`/home/ytdownload/cookies_youtube_${i}.txt`);
+      }
+    }
+    this.YOUTUBE_COOKIES_FILE = this.YOUTUBE_COOKIES[0] || null;
     
     // Extension API
     if (process.env.API_SECRET_KEY) {
@@ -411,7 +443,9 @@ class Config {
       TRON_API_URL: this.TRON_API_URL,
       TRON_API_KEY: this.TRON_API_KEY,
       TELEGRAM_ADMIN_ID: this.TELEGRAM_ADMIN_ID,
+      INSTAGRAM_COOKIES: this.INSTAGRAM_COOKIES,
       INSTAGRAM_COOKIES_FILE: this.INSTAGRAM_COOKIES_FILE,
+      YOUTUBE_COOKIES: this.YOUTUBE_COOKIES,
       YOUTUBE_COOKIES_FILE: this.YOUTUBE_COOKIES_FILE,
       API_SECRET_KEY: this.API_SECRET_KEY
     };

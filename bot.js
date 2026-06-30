@@ -93,6 +93,14 @@ class BotController {
 
     // Флаг ожидания загрузки куков от админа ('instagram' | 'youtube' | null)
     this.pendingCookiesUpload = null;
+
+    // Cookie rotation state
+    this.instagramCurrentIndex = 0;
+    this.youtubeCurrentIndex = 0;
+    this.instagramWorkingSlots = new Set(); // индексы рабочих слотов
+    this.youtubeWorkingSlots = new Set();
+    this.instagramCookiesAlertSent = false;
+    this.youtubeCookiesAlertSent = false;
     
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
@@ -247,151 +255,112 @@ class BotController {
 
   /**
    * Периодическая проверка доступности скачивания YouTube видео
-   * Если cookies протухли — уведомляет админа
+   * Проверяет все слоты куков, переключает при необходимости
    */
   startCookiesHealthCheck() {
     const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
-    const TEST_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-    this.cookiesAlertSent = false;
 
     const check = async () => {
       if (!this.config.TELEGRAM_ADMIN_ID) return;
+      if (this.config.YOUTUBE_COOKIES.length === 0) return;
 
       try {
-        const { spawn } = require('child_process');
-        const result = await new Promise((resolve) => {
-          const proc = spawn('yt-dlp', ['-f', '18', '-o', '/dev/null', '--no-warnings', TEST_URL]);
-          let stderr = '';
-          proc.stderr.on('data', (d) => { stderr += d.toString(); });
-          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve({ ok: false, reason: 'timeout' }); }, 60000);
-          proc.on('close', (code) => {
-            clearTimeout(timeout);
-            resolve({ ok: code === 0, reason: stderr });
-          });
-          proc.on('error', (err) => {
-            clearTimeout(timeout);
-            resolve({ ok: false, reason: err.message });
-          });
+        this.youtubeWorkingSlots = await this.checkAllCookiesSlots('youtube');
+        const workingCount = this.youtubeWorkingSlots.size;
+        const totalCount = this.config.YOUTUBE_COOKIES.length;
+
+        Logger.info('YouTube cookies health check completed', {
+          working: workingCount,
+          total: totalCount,
+          current: this.youtubeCurrentIndex
         });
 
-        if (result.ok) {
-          if (this.cookiesAlertSent) {
-            this.cookiesAlertSent = false;
+        if (workingCount === 0) {
+          // Все слоты протухли
+          if (!this.youtubeCookiesAlertSent) {
+            this.youtubeCookiesAlertSent = true;
+            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+              '🍪 <b>Все куки YouTube протухли!</b>\n\n' +
+              'Скачивание видео с YouTube не работает.\n' +
+              'Обновите хотя бы один слот через /admin → 🍪 Куки YouTube',
+              { parse_mode: 'HTML' }
+            );
+          }
+        } else {
+          // Есть рабочие слоты
+          if (this.youtubeCookiesAlertSent) {
+            this.youtubeCookiesAlertSent = false;
             Logger.info('YouTube cookies recovered');
           }
-          Logger.info('YouTube cookies health check passed');
-        } else {
-          Logger.warn('YouTube cookies health check failed', { reason: result.reason });
 
-          if (!this.cookiesAlertSent) {
-            this.cookiesAlertSent = true;
-            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
-              '🍪 <b>YouTube cookies протухли!</b>\n\n' +
-              'Скачивание видео с YouTube не работает.\n\n' +
-              '<b>Способ 1 — через бота:</b>\n' +
-              'Нажми кнопку ниже и отправь файл\n\n' +
-              '<b>Способ 2 — через сервер:</b>\n' +
-              '1. Открой YouTube в Chrome, залогинься\n' +
-              '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
-              '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Загрузи файл на сервер:\n' +
-              '<code>scp cookies.txt prod:/home/ytdownload/cookies.txt</code>\n' +
-              '5. Перезапусти бота:\n' +
-              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
-              '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
-              {
-                parse_mode: 'HTML',
-                disable_web_page_preview: true,
-                reply_markup: {
-                  inline_keyboard: [[
-                    { text: '🍪 Обновить куки YouTube', callback_data: 'admin_youtube_cookies' }
-                  ]]
-                }
-              }
-            );
+          // Если текущий слот не рабочий — переключаемся
+          if (!this.youtubeWorkingSlots.has(this.youtubeCurrentIndex)) {
+            const rotated = this.rotateToNextWorking('youtube');
+            if (rotated) {
+              await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+                `🔄 YouTube: переключился на слот #${this.youtubeCurrentIndex + 1} (${workingCount}/${totalCount} работают)`
+              );
+            }
           }
         }
       } catch (error) {
-        Logger.error('Cookies health check error', error);
+        Logger.error('YouTube cookies health check error', error);
       }
     };
 
     setTimeout(check, 60 * 1000);
     setInterval(check, CHECK_INTERVAL);
-    Logger.info('Cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
+    Logger.info('YouTube cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
   }
 
   /**
    * Периодическая проверка доступности скачивания Instagram контента
-   * Если Instagram cookies протухли — уведомляет админа
+   * Проверяет все слоты куков, переключает при необходимости
    */
   startInstagramCookiesHealthCheck() {
     const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
-    const TEST_URL = 'https://www.instagram.com/reel/DU4hf2mjLFI/';
-    this.instagramCookiesAlertSent = false;
 
     const check = async () => {
       if (!this.config.TELEGRAM_ADMIN_ID) return;
-      if (!this.config.INSTAGRAM_COOKIES_FILE) {
-        Logger.info('Instagram cookies check skipped (no INSTAGRAM_COOKIES_FILE configured)');
-        return;
-      }
+      if (this.config.INSTAGRAM_COOKIES.length === 0) return;
 
       try {
-        const { spawn } = require('child_process');
-        const result = await new Promise((resolve) => {
-          const proc = spawn('yt-dlp', [
-            '--cookies', this.config.INSTAGRAM_COOKIES_FILE,
-            '-j', '--no-warnings', TEST_URL
-          ]);
-          let stderr = '';
-          proc.stderr.on('data', (d) => { stderr += d.toString(); });
-          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve({ ok: false, reason: 'timeout' }); }, 60000);
-          proc.on('close', (code) => {
-            clearTimeout(timeout);
-            resolve({ ok: code === 0, reason: stderr });
-          });
-          proc.on('error', (err) => {
-            clearTimeout(timeout);
-            resolve({ ok: false, reason: err.message });
-          });
+        this.instagramWorkingSlots = await this.checkAllCookiesSlots('instagram');
+        const workingCount = this.instagramWorkingSlots.size;
+        const totalCount = this.config.INSTAGRAM_COOKIES.length;
+
+        Logger.info('Instagram cookies health check completed', {
+          working: workingCount,
+          total: totalCount,
+          current: this.instagramCurrentIndex
         });
 
-        if (result.ok) {
+        if (workingCount === 0) {
+          // Все слоты протухли
+          if (!this.instagramCookiesAlertSent) {
+            this.instagramCookiesAlertSent = true;
+            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+              '📸 <b>Все куки Instagram протухли!</b>\n\n' +
+              'Скачивание Instagram не работает.\n' +
+              'Обновите хотя бы один слот через /admin → 🍪 Куки Instagram',
+              { parse_mode: 'HTML' }
+            );
+          }
+        } else {
+          // Есть рабочие слоты
           if (this.instagramCookiesAlertSent) {
             this.instagramCookiesAlertSent = false;
             Logger.info('Instagram cookies recovered');
           }
-          Logger.info('Instagram cookies health check passed');
-        } else {
-          Logger.warn('Instagram cookies health check failed', { reason: result.reason });
 
-          if (!this.instagramCookiesAlertSent) {
-            this.instagramCookiesAlertSent = true;
-            await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
-              '📸 <b>Instagram cookies протухли!</b>\n\n' +
-              'Скачивание Instagram не работает.\n\n' +
-              '<b>Способ 1 — через бота:</b>\n' +
-              'Нажми кнопку ниже и отправь файл\n\n' +
-              '<b>Способ 2 — через сервер:</b>\n' +
-              '1. Открой Instagram в Chrome, залогинься\n' +
-              '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
-              '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Загрузи файл на сервер:\n' +
-              '<code>scp instagram_cookies.txt prod:/home/ytdownload/instagram_cookies.txt</code>\n' +
-              '5. Перезапусти бота:\n' +
-              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
-              '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
-              {
-                parse_mode: 'HTML',
-                disable_web_page_preview: true,
-                reply_markup: {
-                  inline_keyboard: [[
-                    { text: '🍪 Обновить куки Instagram', callback_data: 'admin_cookies' }
-                  ]]
-                }
-              }
-            );
+          // Если текущий слот не рабочий — переключаемся
+          if (!this.instagramWorkingSlots.has(this.instagramCurrentIndex)) {
+            const rotated = this.rotateToNextWorking('instagram');
+            if (rotated) {
+              await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
+                `🔄 Instagram: переключился на слот #${this.instagramCurrentIndex + 1} (${workingCount}/${totalCount} работают)`
+              );
+            }
           }
         }
       } catch (error) {
@@ -994,14 +963,8 @@ class BotController {
       // Загрузка куков Instagram
       if (callbackData === 'admin_cookies') {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
-          this.pendingCookiesUpload = 'instagram';
-          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Жду файл' });
-          await this.telegramApi.sendMessage(chatId,
-            '🍪 <b>Загрузка куков Instagram</b>\n\n' +
-            'Отправьте файл <code>cookies.txt</code> (Netscape format).\n' +
-            'Для отмены отправьте /cancel',
-            { parse_mode: 'HTML' }
-          );
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю слоты...' });
+          await this.showCookiesSlotsMenu(chatId, 'instagram');
         } else {
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
         }
@@ -1011,17 +974,38 @@ class BotController {
       // Загрузка куков YouTube
       if (callbackData === 'admin_youtube_cookies') {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
-          this.pendingCookiesUpload = 'youtube';
-          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Жду файл' });
-          await this.telegramApi.sendMessage(chatId,
-            '🍪 <b>Загрузка куков YouTube</b>\n\n' +
-            'Отправьте файл <code>cookies.txt</code> (Netscape format).\n' +
-            'Для отмены отправьте /cancel',
-            { parse_mode: 'HTML' }
-          );
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Открываю слоты...' });
+          await this.showCookiesSlotsMenu(chatId, 'youtube');
         } else {
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
         }
+        return;
+      }
+
+      // Выбор слота для загрузки куков: admin_cookies_insta_1 ... admin_cookies_insta_10
+      if (callbackData.startsWith('admin_cookies_insta_') || callbackData.startsWith('admin_cookies_yt_')) {
+        if (this.config.TELEGRAM_ADMIN_ID && userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+          return;
+        }
+        const isInstagram = callbackData.startsWith('admin_cookies_insta_');
+        const slotIndex = parseInt(callbackData.split('_').pop()) - 1;
+        const platform = isInstagram ? 'instagram' : 'youtube';
+        const cookies = isInstagram ? this.config.INSTAGRAM_COOKIES : this.config.YOUTUBE_COOKIES;
+
+        if (slotIndex < 0 || slotIndex >= cookies.length) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Неверный слот' });
+          return;
+        }
+
+        this.pendingCookiesUpload = `${platform}_${slotIndex}`;
+        await this.telegramApi.answerCallbackQuery(query.id, { text: `Слот #${slotIndex + 1}` });
+        await this.telegramApi.sendMessage(chatId,
+          `🍪 <b>Загрузка куков ${isInstagram ? 'Instagram' : 'YouTube'} — слот #${slotIndex + 1}</b>\n\n` +
+          `Файл будет сохранён в:\n<code>${cookies[slotIndex]}</code>\n\n` +
+          `Отправьте файл в формате .txt (Netscape format).\nДля отмены /cancel`,
+          { parse_mode: 'HTML' }
+        );
         return;
       }
       
@@ -1239,7 +1223,7 @@ class BotController {
       // Это обходит 403 на video-only потоках, потому что yt-dlp берёт URL через свой пайплайн.
       Logger.info('Downloading with yt-dlp merge', { userId, formatId: format.format_id });
 
-      const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
+      const cookiesFile = this.getActiveCookiesPath('youtube') || undefined;
 
       // Основная попытка: конкретный формат + лучшее аудио
       let downloaded = false;
@@ -1574,7 +1558,7 @@ class BotController {
         try {
           // Fallback: пробуем bestvideo+bestaudio через yt-dlp merge
           const combinedOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'fallback.mp4');
-          const cookiesFile = this.config.YOUTUBE_COOKIES_FILE || undefined;
+          const cookiesFile = this.getActiveCookiesPath('youtube') || undefined;
           const fallbackArgs = [
             '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             '--merge-output-format', 'mp4',
@@ -1747,7 +1731,8 @@ class BotController {
     
     try {
       // Получаем информацию о видео
-      const videoInfo = await this.videoProcessor.getVideoInfo(url, this.config.INSTAGRAM_COOKIES_FILE);
+      const cookiesPath = this.getActiveCookiesPath('instagram');
+      let videoInfo = await this.videoProcessor.getVideoInfo(url, cookiesPath);
       
       if (!videoInfo) {
         await this.telegramHelper.sendError(chatId, 'video_unavailable');
@@ -1763,7 +1748,7 @@ class BotController {
       
       // Скачиваем Instagram контент
       Logger.info('Downloading Instagram content', { userId, url, videoId });
-      await this.videoProcessor.downloadInstagram(url, outputPath, this.config.DOWNLOAD_TIMEOUT, this.config.INSTAGRAM_COOKIES_FILE);
+      await this.videoProcessor.downloadInstagram(url, outputPath, this.config.DOWNLOAD_TIMEOUT, this.getActiveCookiesPath('instagram'));
       
       // Проверяем размер файла
       const fileSize = await this.fileManager.getFileSize(outputPath);
@@ -1856,10 +1841,40 @@ class BotController {
       if (error.message === 'TIMEOUT') {
         errorType = 'timeout';
       } else if (error.message === 'INSTAGRAM_LOGIN_REQUIRED') {
+        // Попробовать переключиться на следующий рабочий слот и повторить
+        this.instagramWorkingSlots.delete(this.instagramCurrentIndex);
+        if (this.rotateToNextWorking('instagram')) {
+          Logger.info('Instagram cookies rotated on download failure, retrying', { newIndex: this.instagramCurrentIndex });
+          try {
+            const newCookiesPath = this.getActiveCookiesPath('instagram');
+            const retryVideoInfo = await this.videoProcessor.getVideoInfo(url, newCookiesPath);
+            if (retryVideoInfo) {
+              const retryOutputPath = this.fileManager.generateFilePath(videoId || `ig_${Date.now()}`, 'mp4');
+              await this.fileManager.deleteFile(outputPath).catch(() => {});
+              await this.videoProcessor.downloadInstagram(url, retryOutputPath, this.config.DOWNLOAD_TIMEOUT, newCookiesPath);
+              outputPath = retryOutputPath;
+              // Продолжаем отправку — перезапускаем с новыми куками
+              const retryFileSize = await this.fileManager.getFileSize(outputPath);
+              Logger.info('Instagram retry with new cookies succeeded', { userId, videoId, fileSize: retryFileSize });
+              // Удаляем старое сообщение и отправляем файл
+              if (statusMessage) {
+                try { await this.telegramApi.deleteMessage(chatId, statusMessage.message_id); } catch {}
+              }
+              await this.telegramApi.sendChatAction(chatId, 'upload_video');
+              const quality = videoInfo.title ? 'instagram' : 'best';
+              await this.telegramHelper.sendVideoFile(chatId, outputPath, retryVideoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+              Logger.info('Instagram content sent to Telegram (after rotation)', { userId, videoId, fileSize: retryFileSize });
+              return;
+            }
+          } catch (retryError) {
+            Logger.warn('Instagram retry after rotation also failed', { userId, error: retryError.message });
+          }
+        }
+        // Переключение не помогло — показываем ошибку
         if (userId === this.config.TELEGRAM_ADMIN_ID) {
           await this.telegramApi.sendMessage(chatId,
             '⚠️ <b>Куки Instagram протухли</b>\n\n' +
-            'Обновите их через /admin → 🍪 Куки Instagram',
+            'Все рабочие слоты исчерпаны. Обновите куки через /admin → 🍪 Куки Instagram',
             { parse_mode: 'HTML' }
           );
         } else {
@@ -1927,6 +1942,108 @@ class BotController {
     if (bytes === 0) return '0 B';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  }
+
+  /**
+   * Получает текущий активный путь куков для платформы
+   * @param {'instagram'|'youtube'} platform
+   * @returns {string|null}
+   */
+  getActiveCookiesPath(platform) {
+    if (platform === 'instagram') {
+      return this.config.INSTAGRAM_COOKIES[this.instagramCurrentIndex] || null;
+    }
+    return this.config.YOUTUBE_COOKIES[this.youtubeCurrentIndex] || null;
+  }
+
+  /**
+   * Тестирует куки в конкретном слоте
+   * @param {'instagram'|'youtube'} platform
+   * @param {number} index - индекс слота (0-based)
+   * @returns {Promise<boolean>}
+   */
+  async testCookiesSlot(platform, index) {
+    const cookiesPath = platform === 'instagram'
+      ? this.config.INSTAGRAM_COOKIES[index]
+      : this.config.YOUTUBE_COOKIES[index];
+
+    if (!cookiesPath) return false;
+
+    const fs = require('fs').promises;
+    try { await fs.access(cookiesPath); } catch { return false; }
+
+    const testUrl = platform === 'instagram'
+      ? 'https://www.instagram.com/reel/DU4hf2mjLFI/'
+      : 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+
+    try {
+      const result = await new Promise((resolve) => {
+        const { spawn } = require('child_process');
+        const args = ['--no-warnings', '-j', '--cookies', cookiesPath, testUrl];
+        const proc = spawn('yt-dlp', args);
+        let stderr = '';
+        proc.stderr.on('data', (d) => { stderr += d.toString(); });
+        const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(false); }, 30000);
+        proc.on('close', (code) => { clearTimeout(timeout); resolve(code === 0); });
+        proc.on('error', () => { clearTimeout(timeout); resolve(false); });
+      });
+      return result;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Проверяет все слоты куков для платформы, возвращает множество рабочих
+   * @param {'instagram'|'youtube'} platform
+   * @returns {Promise<Set<number>>} - множество индексов рабочих слотов
+   */
+  async checkAllCookiesSlots(platform) {
+    const cookies = platform === 'instagram'
+      ? this.config.INSTAGRAM_COOKIES
+      : this.config.YOUTUBE_COOKIES;
+    const working = new Set();
+
+    for (let i = 0; i < cookies.length; i++) {
+      const ok = await this.testCookiesSlot(platform, i);
+      if (ok) working.add(i);
+    }
+
+    return working;
+  }
+
+  /**
+   * Переключается на следующий рабочий слот
+   * @param {'instagram'|'youtube'} platform
+   * @returns {boolean} - удалось ли переключиться
+   */
+  rotateToNextWorking(platform) {
+    const cookies = platform === 'instagram'
+      ? this.config.INSTAGRAM_COOKIES
+      : this.config.YOUTUBE_COOKIES;
+    const working = platform === 'instagram'
+      ? this.instagramWorkingSlots
+      : this.youtubeWorkingSlots;
+    const currentIndex = platform === 'instagram'
+      ? this.instagramCurrentIndex
+      : this.youtubeCurrentIndex;
+
+    // Ищем следующий рабочий слот начиная с текущего+1
+    for (let i = 1; i < cookies.length; i++) {
+      const nextIndex = (currentIndex + i) % cookies.length;
+      if (working.has(nextIndex)) {
+        if (platform === 'instagram') {
+          this.instagramCurrentIndex = nextIndex;
+          this.config.INSTAGRAM_COOKIES_FILE = cookies[nextIndex];
+        } else {
+          this.youtubeCurrentIndex = nextIndex;
+          this.config.YOUTUBE_COOKIES_FILE = cookies[nextIndex];
+        }
+        Logger.info(`${platform} cookies rotated`, { from: currentIndex, to: nextIndex });
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -2533,6 +2650,56 @@ class BotController {
   }
 
   /**
+   * Показывает меню выбора слотов куков
+   * @param {number} chatId - ID чата
+   * @param {'instagram'|'youtube'} platform
+   */
+  async showCookiesSlotsMenu(chatId, platform) {
+    const cookies = platform === 'instagram'
+      ? this.config.INSTAGRAM_COOKIES
+      : this.config.YOUTUBE_COOKIES;
+    const working = platform === 'instagram'
+      ? this.instagramWorkingSlots
+      : this.youtubeWorkingSlots;
+    const currentIndex = platform === 'instagram'
+      ? this.instagramCurrentIndex
+      : this.youtubeCurrentIndex;
+    const label = platform === 'instagram' ? 'Instagram' : 'YouTube';
+    const callbackPrefix = platform === 'instagram' ? 'admin_cookies_insta_' : 'admin_cookies_yt_';
+
+    const fs = require('fs').promises;
+    const keyboard = { inline_keyboard: [] };
+
+    for (let i = 0; i < cookies.length; i++) {
+      let status = '⬜'; // empty
+      try {
+        await fs.access(cookies[i]);
+        status = working.has(i) ? '✅' : '❌'; // working or expired
+      } catch {
+        status = '⬜'; // file doesn't exist
+      }
+      const isActive = i === currentIndex ? ' (активный)' : '';
+      keyboard.inline_keyboard.push([{
+        text: `${status} ${label} #${i + 1}${isActive}`,
+        callback_data: `${callbackPrefix}${i + 1}`
+      }]);
+    }
+
+    keyboard.inline_keyboard.push([{
+      text: '◀️ Назад',
+      callback_data: 'admin_menu'
+    }]);
+
+    await this.telegramApi.sendMessage(
+      chatId,
+      `🍪 <b>Куки ${label} — ${cookies.length} слотов</b>\n\n` +
+      `✅ работает | ❌ протух | ⬜ пуст\n` +
+      `Текущий активный: слот #${currentIndex + 1}`,
+      { parse_mode: 'HTML', reply_markup: keyboard }
+    );
+  }
+
+  /**
    * Показывает информацию о занятом месте в папке temp
    * @param {number} chatId - ID чата
    */
@@ -2673,9 +2840,27 @@ class BotController {
 
     this.pendingCookiesUpload = null;
 
-    const label = type === 'youtube' ? 'YouTube' : 'Instagram';
-    const configKey = type === 'youtube' ? 'YOUTUBE_COOKIES_FILE' : 'INSTAGRAM_COOKIES_FILE';
-    const defaultName = type === 'youtube' ? 'cookies.txt' : 'instagram_cookies.txt';
+    // Парсим тип: 'instagram', 'youtube', 'instagram_0'...'instagram_9', 'youtube_0'...'youtube_9'
+    let platform, slotIndex;
+    if (type.includes('_')) {
+      const parts = type.split('_');
+      platform = parts[0];
+      slotIndex = parseInt(parts[1]);
+    } else {
+      platform = type;
+      slotIndex = 0;
+    }
+
+    const isInstagram = platform === 'instagram';
+    const label = isInstagram ? 'Instagram' : 'YouTube';
+    const cookies = isInstagram ? this.config.INSTAGRAM_COOKIES : this.config.YOUTUBE_COOKIES;
+
+    if (slotIndex < 0 || slotIndex >= cookies.length) {
+      await this.telegramApi.sendMessage(chatId, '❌ Неверный слот.');
+      return;
+    }
+
+    const cookiesPath = cookies[slotIndex];
 
     // Проверяем расширение файла
     const fileName = document.file_name || '';
@@ -2709,27 +2894,23 @@ class BotController {
         }).on('error', reject);
       });
 
-      // Сохраняем в путь из конфига
-      const cookiesPath = this.config[configKey] || path.resolve(defaultName);
+      // Сохраняем в путь слота
       await fs.writeFile(cookiesPath, fileData);
 
-      // Обновляем конфиг
-      this.config[configKey] = cookiesPath;
-
-      Logger.info(`${label} cookies updated by admin`, { chatId, size: fileData.length });
+      Logger.info(`${label} cookies slot #${slotIndex + 1} updated by admin`, { chatId, size: fileData.length });
 
       await this.telegramApi.sendMessage(chatId,
-        `✅ <b>Куки ${label} обновлены!</b>\n\n` +
+        `✅ <b>Куки ${label} — слот #${slotIndex + 1} обновлены!</b>\n\n` +
         `📄 Файл: <code>${cookiesPath}</code>\n` +
         `📊 Размер: ${this.formatFileSize(fileData.length)}\n\n` +
-        `Проверка работоспособности через несколько секунд...`,
+        `Проверка работоспособности...`,
         { parse_mode: 'HTML' }
       );
 
       // Быстрая проверка
-      const testUrl = type === 'youtube'
-        ? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-        : 'https://www.instagram.com/reel/DY-FHWUk9ZU/';
+      const testUrl = isInstagram
+        ? 'https://www.instagram.com/reel/DU4hf2mjLFI/'
+        : 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 
       setTimeout(async () => {
         try {
@@ -2738,10 +2919,22 @@ class BotController {
             '--cookies', cookiesPath,
             testUrl
           ], 15000);
-          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} работают!`);
+          // Обновляем множество рабочих слотов
+          if (isInstagram) {
+            this.instagramWorkingSlots.add(slotIndex);
+          } else {
+            this.youtubeWorkingSlots.add(slotIndex);
+          }
+          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} слот #${slotIndex + 1} работают!`);
         } catch (e) {
+          // Убираем из рабочих
+          if (isInstagram) {
+            this.instagramWorkingSlots.delete(slotIndex);
+          } else {
+            this.youtubeWorkingSlots.delete(slotIndex);
+          }
           await this.telegramApi.sendMessage(chatId,
-            `⚠️ Куки загружены, но проверка не прошла.\nОшибка: ${e.message?.slice(0, 200)}`
+            `⚠️ Куки загружены в слот #${slotIndex + 1}, но проверка не прошла.\nОшибка: ${e.message?.slice(0, 200)}`
           );
         }
       }, 2000);

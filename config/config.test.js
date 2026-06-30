@@ -274,7 +274,10 @@ describe('Config Module', () => {
         TRON_API_KEY: null,
         TRON_API_URL: "https://api.trongrid.io",
         USDT_ADDRESS: null,
-        INSTAGRAM_COOKIES_FILE: null
+        INSTAGRAM_COOKIES: expect.any(Array),
+        INSTAGRAM_COOKIES_FILE: null,
+        YOUTUBE_COOKIES: expect.any(Array),
+        YOUTUBE_COOKIES_FILE: null
       });
     });
   });
