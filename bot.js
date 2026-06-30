@@ -1846,11 +1846,19 @@ class BotController {
       if (error.message === 'TIMEOUT') {
         errorType = 'timeout';
       } else if (error.message === 'INSTAGRAM_LOGIN_REQUIRED') {
-        await this.telegramApi.sendMessage(chatId,
-          '⚠️ <b>Временные проблемы с доступом к Instagram</b>\n\n' +
-          'Администратор уже уведомлён. Попробуйте позже.'
-, { parse_mode: 'HTML' }
-        );
+        if (userId === this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.sendMessage(chatId,
+            '⚠️ <b>Куки Instagram протухли</b>\n\n' +
+            'Обновите их через /admin → 🍪 Куки Instagram',
+            { parse_mode: 'HTML' }
+          );
+        } else {
+          await this.telegramApi.sendMessage(chatId,
+            '⚠️ <b>Временные проблемы с доступом к Instagram</b>\n\n' +
+            'Администратор уже уведомлён. Попробуйте позже.',
+            { parse_mode: 'HTML' }
+          );
+        }
         return;
       } else if (error.message === 'INSTAGRAM_UNAVAILABLE') {
         errorType = 'video_unavailable';
