@@ -361,6 +361,122 @@ class FileManager {
     });
   }
 
+  /**
+   * Сжимает видео до целевого размера (в байтах) через two-pass кодирование.
+   * @param {string} inputPath - путь к исходному видео
+   * @param {string} outputPath - путь для сохранения результата
+   * @param {number} targetSizeBytes - целевой размер в байтах
+   * @returns {Promise<string>} - путь к сжатому файлу
+   */
+  async compressVideo(inputPath, outputPath, targetSizeBytes) {
+    // Получаем длительность через ffprobe
+    const duration = await this._getVideoDuration(inputPath);
+    if (!duration || duration <= 0) {
+      throw new Error('COMPRESS_FAILED: cannot determine video duration');
+    }
+
+    // Вычисляем целевой битрейт (минус аудио ~128kbps)
+    const audioBitrate = 128; // kbps
+    const targetBitrate = Math.floor((targetSizeBytes * 8) / duration / 1000) - audioBitrate;
+
+    if (targetBitrate <= 0) {
+      throw new Error('COMPRESS_FAILED: target bitrate too low');
+    }
+
+    Logger.info('Compressing video', {
+      inputPath,
+      duration: Math.round(duration),
+      targetSizeMB: Math.round(targetSizeBytes / 1048576),
+      targetBitrate: `${targetBitrate}k`
+    });
+
+    // Один timestamp для лог-файлов two-pass
+    const passLogPrefix = path.join(path.dirname(outputPath), `_compress_${Date.now()}`);
+
+    // Pass 1
+    await this._ffmpegPass(inputPath, targetBitrate, null, true, passLogPrefix);
+
+    // Pass 2
+    await this._ffmpegPass(inputPath, targetBitrate, outputPath, false, passLogPrefix);
+
+    // Удаляем лог-файлы two-pass
+    try {
+      const fsSync = require('fs');
+      try { fsSync.unlinkSync(`${passLogPrefix}-0.log`); } catch {}
+      try { fsSync.unlinkSync(`${passLogPrefix}-0.log.mbtree`); } catch {}
+    } catch {}
+
+    Logger.info('Video compressed successfully', { outputPath });
+    return outputPath;
+  }
+
+  /** Получает длительность видео через ffprobe */
+  _getVideoDuration(filePath) {
+    return new Promise((resolve) => {
+      const ffprobe = spawn('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        filePath
+      ]);
+
+      let stdout = '';
+      ffprobe.stdout.on('data', d => { stdout += d.toString(); });
+
+      ffprobe.on('close', (code) => {
+        const dur = parseFloat(stdout.trim());
+        resolve(code === 0 && !isNaN(dur) ? dur : null);
+      });
+
+      ffprobe.on('error', () => resolve(null));
+    });
+  }
+
+  /** Одна pass ffmpeg для компрессии */
+  _ffmpegPass(inputPath, bitrate, outputPath, isPass1, logPrefix) {
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-y', '-i', inputPath,
+        '-c:v', 'libx264',
+        '-b:v', `${bitrate}k`,
+        '-passlogfile', logPrefix,
+        '-pass', isPass1 ? '1' : '2',
+        '-an'
+      ];
+
+      if (isPass1) {
+        args.push('-f', 'null');
+        args.push(process.platform === 'win32' ? 'NUL' : '/dev/null');
+      } else {
+        args.push('-c:a', 'aac', '-b:a', '128k');
+        args.push(outputPath);
+      }
+
+      const ffmpeg = spawn('ffmpeg', args);
+      let stderr = '';
+      ffmpeg.stderr.on('data', d => { stderr += d.toString(); });
+
+      const timeoutId = setTimeout(() => {
+        ffmpeg.kill('SIGKILL');
+        reject(new Error('COMPRESS_TIMEOUT'));
+      }, this.mergeTimeout * 2);
+
+      ffmpeg.on('close', (code) => {
+        clearTimeout(timeoutId);
+        if (code === 0) resolve();
+        else {
+          Logger.error('ffmpeg compress pass failed', new Error(stderr), { code, isPass1 });
+          reject(new Error('COMPRESS_FAILED'));
+        }
+      });
+
+      ffmpeg.on('error', (err) => {
+        clearTimeout(timeoutId);
+        reject(err);
+      });
+    });
+  }
+
   /** Склеивает части видео через concat demuxer (без перекодирования) */
   _ffmpegConcat(concatListPath, outputPath) {
     return new Promise((resolve, reject) => {

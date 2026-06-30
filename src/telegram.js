@@ -1,4 +1,4 @@
-const { Formatter } = require('./utils');
+const { Formatter, Logger } = require('./utils');
 
 /**
  * TelegramHelper - класс для работы с Telegram API и форматирования сообщений

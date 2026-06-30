@@ -1693,49 +1693,75 @@ class BotController {
       const fileSize = await this.fileManager.getFileSize(outputPath);
       Logger.info('Instagram content downloaded', { userId, videoId, fileSize });
       
-      // Лимиты для отправки
-      const TELEGRAM_STABLE_LIMIT = 104857600; // 100MB
+      // Лимит Telegram Bot API — 50 МБ
+      const TELEGRAM_FILE_LIMIT = 52428800; // 50MB
       const TELEGRAM_TRY_LIMIT = this.config.TELEGRAM_UPLOAD_LIMIT; // 500MB
-      
-      if (fileSize <= TELEGRAM_STABLE_LIMIT) {
-        // Отправляем в Telegram
+
+      let sendFilePath = outputPath;
+      let compressedPath = null;
+
+      // Если файл больше 50 МБ — сжимаем перед отправкой
+      if (fileSize > TELEGRAM_FILE_LIMIT) {
+        Logger.info('Instagram file exceeds Telegram limit, compressing', { userId, videoId, fileSize });
+        await this.telegramApi.editMessageText('⚙️ Сжимаю видео...', {
+          chat_id: chatId,
+          message_id: statusMessage.message_id
+        }).catch(() => {});
+
+        compressedPath = this.fileManager.generateFilePath(`${videoId}_compressed`, 'mp4');
+        try {
+          await this.fileManager.compressVideo(outputPath, compressedPath, TELEGRAM_FILE_LIMIT - 1048576); // 49 МБ с запасом
+          const compressedSize = await this.fileManager.getFileSize(compressedPath);
+          Logger.info('Video compressed', { userId, videoId, originalSize: fileSize, compressedSize });
+          sendFilePath = compressedPath;
+        } catch (compressError) {
+          Logger.warn('Video compression failed, falling back to original', { userId, videoId, error: compressError.message });
+          sendFilePath = outputPath;
+          compressedPath = null;
+        }
+      }
+
+      const sendFileSize = await this.fileManager.getFileSize(sendFilePath);
+
+      if (sendFileSize <= TELEGRAM_FILE_LIMIT) {
+        // Файл влезает в Telegram (или сжат) — отправляем напрямую
         await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
         await this.telegramApi.sendChatAction(chatId, 'upload_video');
-        
+
         const quality = videoInfo.title ? 'instagram' : 'best';
-        await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
-        
-        Logger.info('Instagram content sent to Telegram', { userId, videoId, fileSize });
-        
-      } else if (fileSize <= TELEGRAM_TRY_LIMIT) {
+        await this.telegramHelper.sendVideoFile(chatId, sendFilePath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+
+        Logger.info('Instagram content sent to Telegram', { userId, videoId, fileSize: sendFileSize });
+
+      } else if (sendFileSize <= TELEGRAM_TRY_LIMIT) {
         // Пытаемся отправить в Telegram, при неудаче — ссылка на сервер
         try {
           await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
           await this.telegramApi.sendChatAction(chatId, 'upload_video');
-          
+
           const quality = videoInfo.title ? 'instagram' : 'best';
-          await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
-          
-          Logger.info('Large Instagram content sent to Telegram', { userId, videoId, fileSize });
-          
+          await this.telegramHelper.sendVideoFile(chatId, sendFilePath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+
+          Logger.info('Large Instagram content sent to Telegram', { userId, videoId, fileSize: sendFileSize });
+
         } catch (uploadError) {
-          Logger.warn('Telegram upload failed for Instagram, creating server link', { 
-            userId, fileSize, error: uploadError.message 
+          Logger.warn('Telegram upload failed for Instagram, creating server link', {
+            userId, fileSize: sendFileSize, error: uploadError.message
           });
-          
+
           const linkInfo = await this.fileServer.createTemporaryLink(
-            path.resolve(outputPath),
+            path.resolve(sendFilePath),
             `${videoInfo.title || videoId}.mp4`,
             this.config.LARGE_FILE_TTL_MINUTES
           );
-          
+
           fileUsedByServer = true;
           await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
-          
+
           const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
           await this.telegramApi.sendMessage(chatId,
             `📁 <b>Файл готов для скачивания!</b>\n\n` +
-            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+            `📊 Размер: ${this.formatFileSize(sendFileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}`,
             {
               parse_mode: 'HTML',
@@ -1747,25 +1773,25 @@ class BotController {
             }
           );
         }
-        
+
       } else {
         // Файл слишком большой — сразу ссылка на сервер
         const linkInfo = await this.fileServer.createTemporaryLink(
-          path.resolve(outputPath),
+          path.resolve(sendFilePath),
           `${videoInfo.title || videoId}.mp4`,
           this.config.LARGE_FILE_TTL_MINUTES
         );
-        
+
         fileUsedByServer = true;
-        
+
         if (statusMessage) {
           try { await this.telegramApi.deleteMessage(chatId, statusMessage.message_id); } catch {}
         }
-        
+
         const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
         await this.telegramApi.sendMessage(chatId,
           `📁 <b>Файл готов для скачивания!</b>\n\n` +
-          `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+          `📊 Размер: ${this.formatFileSize(sendFileSize)}\n` +
           `⏰ Ссылка действует до: ${expiresAt}\n\n` +
           `ℹ️ Файл слишком большой для Telegram.`,
           {
@@ -1808,6 +1834,9 @@ class BotController {
     } finally {
       if (!fileUsedByServer && outputPath) {
         await this.fileManager.deleteFile(outputPath).catch(() => {});
+      }
+      if (compressedPath) {
+        await this.fileManager.deleteFile(compressedPath).catch(() => {});
       }
     }
   }
