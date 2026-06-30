@@ -287,17 +287,22 @@ class BotController {
             this.cookiesAlertSent = true;
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '🍪 <b>YouTube cookies протухли!</b>\n\n' +
-              'Скачивание видео не работает (403 Forbidden).\n\n' +
+              'Скачивание видео с YouTube не работает.\n\n' +
               '<b>Как обновить:</b>\n' +
               '1. Открой YouTube в Chrome, залогинься\n' +
               '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
               '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Загрузи файл на сервер:\n' +
-              '<code>scp cookies.txt prod:/home/ytdownload/cookies.txt</code>\n' +
-              '5. Перезапусти бота:\n' +
-              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
+              '4. Нажми кнопку ниже и отправь файл\n\n' +
               '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
-              { parse_mode: 'HTML', disable_web_page_preview: true }
+              {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: '🍪 Обновить куки YouTube', callback_data: 'admin_youtube_cookies' }
+                  ]]
+                }
+              }
             );
           }
         }
@@ -365,12 +370,17 @@ class BotController {
               '1. Открой Instagram в Chrome, залогинься\n' +
               '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
               '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Загрузи файл на сервер:\n' +
-              '<code>scp instagram_cookies.txt prod:/home/ytdownload/instagram_cookies.txt</code>\n' +
-              '5. Перезапусти бота:\n' +
-              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
+              '4. Нажми кнопку ниже и отправь файл\n\n' +
               '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
-              { parse_mode: 'HTML', disable_web_page_preview: true }
+              {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: '🍪 Обновить куки Instagram', callback_data: 'admin_cookies' }
+                  ]]
+                }
+              }
             );
           }
         }
@@ -1837,9 +1847,9 @@ class BotController {
         errorType = 'timeout';
       } else if (error.message === 'INSTAGRAM_LOGIN_REQUIRED') {
         await this.telegramApi.sendMessage(chatId,
-          '🔒 *Требуется авторизация*\n\n' +
-          'Этот контент Instagram требует входа в аккаунт.\n' +
-          'Попробуйте другую ссылку (публичный пост/reel).'
+          '⚠️ <b>Временные проблемы с доступом к Instagram</b>\n\n' +
+          'Администратор уже уведомлён. Попробуйте позже.'
+, { parse_mode: 'HTML' }
         );
         return;
       } else if (error.message === 'INSTAGRAM_UNAVAILABLE') {
