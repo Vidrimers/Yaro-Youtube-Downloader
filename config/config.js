@@ -312,11 +312,10 @@ class Config {
     if (this.INSTAGRAM_COOKIES.length === 0 && process.env.INSTAGRAM_COOKIES_FILE) {
       this.INSTAGRAM_COOKIES.push(process.env.INSTAGRAM_COOKIES_FILE);
     }
-    // Дефолтные пути если ничего не настроено
-    if (this.INSTAGRAM_COOKIES.length === 0) {
-      for (let i = 1; i <= 10; i++) {
-        this.INSTAGRAM_COOKIES.push(`/home/ytdownload/instagram_cookies_${i}.txt`);
-      }
+    // Дополняем до 10 дефолтными путями
+    while (this.INSTAGRAM_COOKIES.length < 10) {
+      const idx = this.INSTAGRAM_COOKIES.length + 1;
+      this.INSTAGRAM_COOKIES.push(`/home/ytdownload/instagram_cookies_${idx}.txt`);
     }
     this.INSTAGRAM_COOKIES_FILE = this.INSTAGRAM_COOKIES[0] || null;
 
@@ -332,11 +331,10 @@ class Config {
     if (this.YOUTUBE_COOKIES.length === 0 && process.env.YOUTUBE_COOKIES_FILE) {
       this.YOUTUBE_COOKIES.push(process.env.YOUTUBE_COOKIES_FILE);
     }
-    // Дефолтные пути если ничего не настроено
-    if (this.YOUTUBE_COOKIES.length === 0) {
-      for (let i = 1; i <= 10; i++) {
-        this.YOUTUBE_COOKIES.push(`/home/ytdownload/cookies_youtube_${i}.txt`);
-      }
+    // Дополняем до 10 дефолтными путями
+    while (this.YOUTUBE_COOKIES.length < 10) {
+      const idx = this.YOUTUBE_COOKIES.length + 1;
+      this.YOUTUBE_COOKIES.push(`/home/ytdownload/cookies_youtube_${idx}.txt`);
     }
     this.YOUTUBE_COOKIES_FILE = this.YOUTUBE_COOKIES[0] || null;
     
