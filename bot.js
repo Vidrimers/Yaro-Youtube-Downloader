@@ -288,11 +288,16 @@ class BotController {
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '🍪 <b>YouTube cookies протухли!</b>\n\n' +
               'Скачивание видео с YouTube не работает.\n\n' +
-              '<b>Как обновить:</b>\n' +
+              '<b>Способ 1 — через бота:</b>\n' +
+              'Нажми кнопку ниже и отправь файл\n\n' +
+              '<b>Способ 2 — через сервер:</b>\n' +
               '1. Открой YouTube в Chrome, залогинься\n' +
               '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
               '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Нажми кнопку ниже и отправь файл\n\n' +
+              '4. Загрузи файл на сервер:\n' +
+              '<code>scp cookies.txt prod:/home/ytdownload/cookies.txt</code>\n' +
+              '5. Перезапусти бота:\n' +
+              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
               '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
               {
                 parse_mode: 'HTML',
@@ -366,11 +371,16 @@ class BotController {
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '📸 <b>Instagram cookies протухли!</b>\n\n' +
               'Скачивание Instagram не работает.\n\n' +
-              '<b>Как обновить:</b>\n' +
+              '<b>Способ 1 — через бота:</b>\n' +
+              'Нажми кнопку ниже и отправь файл\n\n' +
+              '<b>Способ 2 — через сервер:</b>\n' +
               '1. Открой Instagram в Chrome, залогинься\n' +
               '2. Установи расширение <code>Get cookies.txt LOCALLY</code>\n' +
               '3. Нажми на иконку расширения → <b>Export</b>\n' +
-              '4. Нажми кнопку ниже и отправь файл\n\n' +
+              '4. Загрузи файл на сервер:\n' +
+              '<code>scp instagram_cookies.txt prod:/home/ytdownload/instagram_cookies.txt</code>\n' +
+              '5. Перезапусти бота:\n' +
+              '<code>ssh prod "pm2 restart ytdownload"</code>\n\n' +
               '⚠️ Расширение: <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc">Chrome Web Store</a>',
               {
                 parse_mode: 'HTML',
