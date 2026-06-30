@@ -315,7 +315,7 @@ class Config {
     // Дополняем до 10 дефолтными путями
     while (this.INSTAGRAM_COOKIES.length < 10) {
       const idx = this.INSTAGRAM_COOKIES.length + 1;
-      this.INSTAGRAM_COOKIES.push(`/home/ytdownload/instagram_cookies_${idx}.txt`);
+      this.INSTAGRAM_COOKIES.push(`/home/ytdownload/cookies_instagram_${idx}.txt`);
     }
     this.INSTAGRAM_COOKIES_FILE = this.INSTAGRAM_COOKIES[0] || null;
 
