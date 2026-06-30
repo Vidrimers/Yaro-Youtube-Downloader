@@ -91,8 +91,8 @@ class BotController {
     // Map<adminId, { targetUserId, duration }> — ожидание причины бана от админа
     this.pendingBanReasons = new Map();
 
-    // Флаг ожидания загрузки куков от админа (true = ждём документ)
-    this.pendingCookiesUpload = false;
+    // Флаг ожидания загрузки куков от админа ('instagram' | 'youtube' | null)
+    this.pendingCookiesUpload = null;
     
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
@@ -177,7 +177,7 @@ class BotController {
     this.bot.on('message', (msg) => {
       // Если админ загружает куки — обрабатываем документ
       if (this.pendingCookiesUpload && msg.document && msg.from.id === this.config.TELEGRAM_ADMIN_ID) {
-        this.handleCookiesUpload(msg.chat.id, msg.document);
+        this.handleCookiesUpload(msg.chat.id, msg.document, this.pendingCookiesUpload);
         return;
       }
       // Игнорируем команды (они обрабатываются отдельно)
@@ -489,7 +489,7 @@ class BotController {
           
         case 'cancel':
           if (this.pendingCookiesUpload) {
-            this.pendingCookiesUpload = false;
+            this.pendingCookiesUpload = null;
             await this.telegramApi.sendMessage(chatId, '❌ Загрузка куков отменена.');
           }
           break;
@@ -974,10 +974,27 @@ class BotController {
       // Загрузка куков Instagram
       if (callbackData === 'admin_cookies') {
         if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
-          this.pendingCookiesUpload = true;
+          this.pendingCookiesUpload = 'instagram';
           await this.telegramApi.answerCallbackQuery(query.id, { text: 'Жду файл' });
           await this.telegramApi.sendMessage(chatId,
             '🍪 <b>Загрузка куков Instagram</b>\n\n' +
+            'Отправьте файл <code>cookies.txt</code> (Netscape format).\n' +
+            'Для отмены отправьте /cancel',
+            { parse_mode: 'HTML' }
+          );
+        } else {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+        }
+        return;
+      }
+
+      // Загрузка куков YouTube
+      if (callbackData === 'admin_youtube_cookies') {
+        if (this.config.TELEGRAM_ADMIN_ID && userId === this.config.TELEGRAM_ADMIN_ID) {
+          this.pendingCookiesUpload = 'youtube';
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Жду файл' });
+          await this.telegramApi.sendMessage(chatId,
+            '🍪 <b>Загрузка куков YouTube</b>\n\n' +
             'Отправьте файл <code>cookies.txt</code> (Netscape format).\n' +
             'Для отмены отправьте /cancel',
             { parse_mode: 'HTML' }
@@ -2478,7 +2495,8 @@ class BotController {
               { text: '🚫 Баны', callback_data: 'admin_bans' }
             ],
             [
-              { text: '🍪 Куки Instagram', callback_data: 'admin_cookies' }
+              { text: '🍪 Куки Instagram', callback_data: 'admin_cookies' },
+              { text: '🍪 Куки YouTube', callback_data: 'admin_youtube_cookies' }
             ]
           ]
         }
@@ -2621,11 +2639,15 @@ class BotController {
    * @param {number} chatId - ID чата
    * @param {Object} document - объект документа из Telegram
    */
-  async handleCookiesUpload(chatId, document) {
+  async handleCookiesUpload(chatId, document, type) {
     const fs = require('fs').promises;
     const path = require('path');
 
-    this.pendingCookiesUpload = false;
+    this.pendingCookiesUpload = null;
+
+    const label = type === 'youtube' ? 'YouTube' : 'Instagram';
+    const configKey = type === 'youtube' ? 'YOUTUBE_COOKIES_FILE' : 'INSTAGRAM_COOKIES_FILE';
+    const defaultName = type === 'youtube' ? 'cookies.txt' : 'instagram_cookies.txt';
 
     // Проверяем имя файла
     const fileName = document.file_name || '';
@@ -2659,32 +2681,36 @@ class BotController {
         }).on('error', reject);
       });
 
-      // Сохраняем в путь из конфига (или дефолт)
-      const cookiesPath = this.config.INSTAGRAM_COOKIES_FILE || path.resolve('instagram_cookies.txt');
+      // Сохраняем в путь из конфига
+      const cookiesPath = this.config[configKey] || path.resolve(defaultName);
       await fs.writeFile(cookiesPath, fileData);
 
       // Обновляем конфиг
-      this.config.INSTAGRAM_COOKIES_FILE = cookiesPath;
+      this.config[configKey] = cookiesPath;
 
-      Logger.info('Instagram cookies updated by admin', { chatId, size: fileData.length });
+      Logger.info(`${label} cookies updated by admin`, { chatId, size: fileData.length });
 
       await this.telegramApi.sendMessage(chatId,
-        `✅ <b>Куки Instagram обновлены!</b>\n\n` +
+        `✅ <b>Куки ${label} обновлены!</b>\n\n` +
         `📄 Файл: <code>${cookiesPath}</code>\n` +
         `📊 Размер: ${this.formatFileSize(fileData.length)}\n\n` +
-        `Проверка работоспособности через несколько секунд...`
-, { parse_mode: 'HTML' }
+        `Проверка работоспособности через несколько секунд...`,
+        { parse_mode: 'HTML' }
       );
 
       // Быстрая проверка
+      const testUrl = type === 'youtube'
+        ? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        : 'https://www.instagram.com/reel/C0VpFH9rCJa/';
+
       setTimeout(async () => {
         try {
-          const result = await this.videoProcessor.executeYtDlp([
+          await this.videoProcessor.executeYtDlp([
             '-j', '--no-warnings',
             '--cookies', cookiesPath,
-            'https://www.instagram.com/reel/C0VpFH9rCJa/'
+            testUrl
           ], 15000);
-          await this.telegramApi.sendMessage(chatId, '✅ Куки работают!');
+          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} работают!`);
         } catch (e) {
           await this.telegramApi.sendMessage(chatId,
             `⚠️ Куки загружены, но проверка не прошла.\nОшибка: ${e.message?.slice(0, 200)}`
@@ -2693,7 +2719,7 @@ class BotController {
       }, 2000);
 
     } catch (error) {
-      Logger.error('Error uploading cookies', error, { chatId });
+      Logger.error(`Error uploading ${label} cookies`, error, { chatId });
       await this.telegramApi.sendMessage(chatId, '❌ Ошибка при загрузке файла. Попробуйте ещё раз.');
     }
   }
