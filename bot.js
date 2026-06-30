@@ -2729,7 +2729,7 @@ class BotController {
       // Быстрая проверка
       const testUrl = type === 'youtube'
         ? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-        : 'https://www.instagram.com/reel/C0VpFH9rCJa/';
+        : 'https://www.instagram.com/reel/DY-FHWUk9ZU/';
 
       setTimeout(async () => {
         try {
