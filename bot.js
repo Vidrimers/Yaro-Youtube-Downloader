@@ -1667,6 +1667,7 @@ class BotController {
   async processInstagramDownload(chatId, userId, url, username) {
     let statusMessage = null;
     let outputPath = null;
+    let compressedPath = null;
     let fileUsedByServer = false;
     
     try {
@@ -1695,6 +1696,7 @@ class BotController {
       
       // Лимит Telegram Bot API — 50 МБ
       const TELEGRAM_FILE_LIMIT = 52428800; // 50MB
+      const duration = videoInfo.duration || 0;
 
       if (fileSize <= TELEGRAM_FILE_LIMIT) {
         // Файл влезает в Telegram — отправляем напрямую
@@ -1706,18 +1708,54 @@ class BotController {
 
         Logger.info('Instagram content sent to Telegram', { userId, videoId, fileSize });
 
+      } else if (duration <= 60) {
+        // Видео короткое (<= 1 мин) но файл > 50 МБ — сжимаем
+        Logger.info('Short video exceeds Telegram limit, compressing', { userId, videoId, fileSize, duration });
+        await this.telegramApi.editMessageText('⚙️ Сжимаю видео...', {
+          chat_id: chatId,
+          message_id: statusMessage.message_id
+        }).catch(() => {});
+
+        compressedPath = this.fileManager.generateFilePath(`${videoId}_compressed`, 'mp4');
+        try {
+          await this.fileManager.compressVideo(outputPath, compressedPath, TELEGRAM_FILE_LIMIT - 1048576);
+          const compressedSize = await this.fileManager.getFileSize(compressedPath);
+          Logger.info('Video compressed', { userId, videoId, originalSize: fileSize, compressedSize });
+
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+          await this.telegramApi.sendChatAction(chatId, 'upload_video');
+
+          const quality = videoInfo.title ? 'instagram' : 'best';
+          await this.telegramHelper.sendVideoFile(chatId, compressedPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+
+          Logger.info('Compressed Instagram content sent to Telegram', { userId, videoId, compressedSize });
+
+        } catch (compressError) {
+          Logger.warn('Compression failed, creating server link', { userId, videoId, error: compressError.message });
+          const linkInfo = await this.fileServer.createTemporaryLink(
+            path.resolve(outputPath), `${videoInfo.title || videoId}.mp4`, this.config.LARGE_FILE_TTL_MINUTES
+          );
+          fileUsedByServer = true;
+          await this.telegramApi.deleteMessage(chatId, statusMessage.message_id);
+          const expiresAt = new Date(linkInfo.expiresAt).toLocaleString('ru-RU');
+          await this.telegramApi.sendMessage(chatId,
+            `📁 <b>Файл слишком большой для Telegram</b>\n\n` +
+            `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
+            `⏰ Ссылка действует до: ${expiresAt}`,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }]] } }
+          );
+        }
+
       } else {
-        // Файл больше 50 МБ — отправляем ссылку на скачивание с сервера
-        Logger.info('Instagram file exceeds Telegram limit, creating server link', { userId, videoId, fileSize });
+        // Видео длинное (> 1 мин) и файл > 50 МБ — ссылка на сервер
+        Logger.info('Long video exceeds Telegram limit, creating server link', { userId, videoId, fileSize, duration });
         await this.telegramApi.editMessageText('⚙️ Подготавливаю файл...', {
           chat_id: chatId,
           message_id: statusMessage.message_id
         }).catch(() => {});
 
         const linkInfo = await this.fileServer.createTemporaryLink(
-          path.resolve(outputPath),
-          `${videoInfo.title || videoId}.mp4`,
-          this.config.LARGE_FILE_TTL_MINUTES
+          path.resolve(outputPath), `${videoInfo.title || videoId}.mp4`, this.config.LARGE_FILE_TTL_MINUTES
         );
 
         fileUsedByServer = true;
@@ -1728,14 +1766,7 @@ class BotController {
           `📁 <b>Файл слишком большой для Telegram</b>\n\n` +
           `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
           `⏰ Ссылка действует до: ${expiresAt}`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [[
-                { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
-              ]]
-            }
-          }
+          { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }]] } }
         );
       }
       
@@ -1768,6 +1799,9 @@ class BotController {
     } finally {
       if (!fileUsedByServer && outputPath) {
         await this.fileManager.deleteFile(outputPath).catch(() => {});
+      }
+      if (compressedPath) {
+        await this.fileManager.deleteFile(compressedPath).catch(() => {});
       }
     }
   }
