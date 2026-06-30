@@ -2649,11 +2649,11 @@ class BotController {
     const configKey = type === 'youtube' ? 'YOUTUBE_COOKIES_FILE' : 'INSTAGRAM_COOKIES_FILE';
     const defaultName = type === 'youtube' ? 'cookies.txt' : 'instagram_cookies.txt';
 
-    // Проверяем имя файла
+    // Проверяем расширение файла
     const fileName = document.file_name || '';
-    if (!fileName.toLowerCase().includes('cookie')) {
+    if (!fileName.toLowerCase().endsWith('.txt')) {
       await this.telegramApi.sendMessage(chatId,
-        '⚠️ Файл должен содержать "cookie" в имени. Отправьте cookies.txt'
+        '⚠️ Файл должен быть в формате .txt. Отправьте cookies.txt'
       );
       return;
     }
