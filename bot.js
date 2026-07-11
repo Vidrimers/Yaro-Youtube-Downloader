@@ -1370,8 +1370,9 @@ class BotController {
         
         const uploadStartTime = Date.now();
         await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+        await this.telegramHelper.sendDonateButton(chatId);
         const uploadDuration = Date.now() - uploadStartTime;
-        
+
         Logger.info('Video uploaded successfully', { userId, videoId: videoInfo.id, fileSize, uploadDuration });
         
       } else if (fileSize <= TELEGRAM_TRY_LIMIT) {
@@ -1390,8 +1391,9 @@ class BotController {
           
           const uploadStartTime = Date.now();
           await this.telegramHelper.sendVideoFile(chatId, finalOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.telegramHelper.sendDonateButton(chatId);
           const uploadDuration = Date.now() - uploadStartTime;
-          
+
           Logger.info('Large video uploaded successfully to Telegram', { userId, videoId: videoInfo.id, fileSize, uploadDuration });
           
         } catch (uploadError) {
@@ -1454,18 +1456,20 @@ class BotController {
               `ℹ️ Скопируйте ссылку и откройте в браузере`,
               { parse_mode: 'HTML' }
             );
+            await this.telegramHelper.sendDonateButton(chatId);
           } else {
             // Для публичного URL используем кнопку
-            await this.telegramApi.sendMessage(chatId, 
+            await this.telegramApi.sendMessage(chatId,
               `📁 <b>Файл готов для скачивания!</b>\n\n` +
               `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
               `⏰ Ссылка действует до: ${expiresAt}`,
-              { 
+              {
                 parse_mode: 'HTML',
                 reply_markup: {
-                  inline_keyboard: [[
-                    { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
-                  ]]
+                  inline_keyboard: [
+                    [{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }],
+                    [{ text: '💝 Донатная', callback_data: 'donate_menu' }]
+                  ]
                 }
               }
             );
@@ -1551,19 +1555,21 @@ class BotController {
             `Скопируйте ссылку и откройте в браузере`,
             { parse_mode: 'HTML' }
           );
+          await this.telegramHelper.sendDonateButton(chatId);
         } else {
           // Для публичного URL используем кнопку
-          await this.telegramApi.sendMessage(chatId, 
+          await this.telegramApi.sendMessage(chatId,
             `📁 <b>Файл готов для скачивания!</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}\n\n` +
             `ℹ️ Файл слишком большой для отправки в Telegram, поэтому создана временная ссылка на сервер.`,
-            { 
+            {
               parse_mode: 'HTML',
               reply_markup: {
-                inline_keyboard: [[
-                  { text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }
-                ]]
+                inline_keyboard: [
+                  [{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }],
+                  [{ text: '💝 Донатная', callback_data: 'donate_menu' }]
+                ]
               }
             }
           );
@@ -1627,8 +1633,9 @@ class BotController {
           }
           
           await this.telegramHelper.sendVideoFile(chatId, combinedOutputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.telegramHelper.sendDonateButton(chatId);
           await this.fileManager.deleteFiles([combinedOutputPath]);
-          
+
           Logger.info('Successfully sent video using best available fallback', { userId });
           return;
         } catch (fallbackError) {
