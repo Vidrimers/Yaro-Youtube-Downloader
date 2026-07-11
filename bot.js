@@ -2781,9 +2781,10 @@ class BotController {
     await this.telegramApi.sendMessage(chatId, text, {
       parse_mode: 'HTML',
       reply_markup: {
-        inline_keyboard: [[
-          { text: '◀️ Назад', callback_data: 'back_to_main' }
-        ]]
+        inline_keyboard: [
+          [{ text: '◀️ Назад', callback_data: 'back_to_main' }],
+          [{ text: '💝 Донатная', callback_data: 'donate_menu' }]
+        ]
       }
     });
   }
