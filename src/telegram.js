@@ -286,9 +286,15 @@ class TelegramHelper {
     const keyboard = {
       inline_keyboard: [
         [
-          { 
-            text: '💝 Донатная', 
-            callback_data: 'donate_menu' 
+          {
+            text: '📊 Моя статистика',
+            callback_data: 'user_stats'
+          }
+        ],
+        [
+          {
+            text: '💝 Донатная',
+            callback_data: 'donate_menu'
           }
         ]
       ]

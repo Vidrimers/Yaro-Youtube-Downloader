@@ -211,6 +211,7 @@ class BotController {
       await this.bot.setMyCommands([
         { command: 'start', description: '🏠 Главное меню' },
         { command: 'help', description: '❓ Помощь' },
+        { command: 'mystats', description: '📊 Моя статистика' },
         { command: 'donate', description: '💝 Донатная' },
         { command: 'contact', description: '✍️ Написать администратору' },
       ]);
@@ -227,6 +228,7 @@ class BotController {
             { command: 'admin', description: '🛠 Панель администратора' },
             { command: 'start', description: '🏠 Главное меню' },
             { command: 'help', description: '❓ Помощь' },
+            { command: 'mystats', description: '📊 Моя статистика' },
             { command: 'donate', description: '💝 Донатная' },
             { command: 'contact', description: '✍️ Написать администратору' },
           ],
@@ -405,6 +407,10 @@ class BotController {
 
         case 'donate':
           await this.telegramHelper.sendDonateMenu(chatId, userId);
+          break;
+
+        case 'mystats':
+          await this.handleMyStats(chatId, userId);
           break;
 
         case 'contact':
@@ -841,6 +847,13 @@ class BotController {
         this.pendingAdminReplies.set(this.config.TELEGRAM_ADMIN_ID, { targetUserId, userText: this.pendingAdminReplies.get(`pending_text_${targetUserId}`) || null });
         await this.telegramApi.sendMessage(chatId, `✍️ Напишите ответ пользователю (ID: <code>${targetUserId}</code>):`, { parse_mode: 'HTML' });
         await this.telegramApi.answerCallbackQuery(query.id, { text: 'Напишите ответ' });
+        return;
+      }
+
+      // Проверяем, является ли это командой статистики
+      if (callbackData === 'user_stats') {
+        await this.handleMyStats(chatId, userId);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Загружаю статистику...' });
         return;
       }
 
@@ -2755,6 +2768,24 @@ class BotController {
         reply_markup: { inline_keyboard: keyboard }
       }
     );
+  }
+
+  /**
+   * Обработка команды /mystats или callback user_stats
+   * @param {number} chatId - ID чата
+   * @param {number} userId - ID пользователя
+   */
+  async handleMyStats(chatId, userId) {
+    const stats = this.statsManager.getUserStats(userId);
+    const text = this.statsManager.formatUserStatsText(stats);
+    await this.telegramApi.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '◀️ Назад', callback_data: 'back_to_main' }
+        ]]
+      }
+    });
   }
 
   /**

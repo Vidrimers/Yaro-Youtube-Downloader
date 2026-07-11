@@ -106,11 +106,64 @@ class StatsManager {
     };
   }
 
+  getUserStats(userId) {
+    if (!this.db || !userId) return null;
+
+    const uid = String(userId);
+
+    const total = this.db.prepare("SELECT COUNT(*) as c FROM downloads WHERE user_id = ?").get(uid).c;
+    const youtube = this.db.prepare("SELECT COUNT(*) as c FROM downloads WHERE user_id = ? AND platform = 'youtube'").get(uid).c;
+    const instagram = this.db.prepare("SELECT COUNT(*) as c FROM downloads WHERE user_id = ? AND platform = 'instagram'").get(uid).c;
+    const sponsorBlock = this.db.prepare("SELECT COUNT(*) as c FROM downloads WHERE user_id = ? AND remove_ads = 1").get(uid).c;
+    const trims = this.db.prepare("SELECT COUNT(*) as c FROM downloads WHERE user_id = ? AND trimmed = 1").get(uid).c;
+
+    const firstDownload = this.db.prepare("SELECT timestamp FROM downloads WHERE user_id = ? ORDER BY timestamp ASC LIMIT 1").get(uid);
+    const lastDownload = this.db.prepare("SELECT timestamp FROM downloads WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1").get(uid);
+
+    return {
+      total,
+      youtube,
+      instagram,
+      sponsorBlock,
+      trims,
+      firstDownload: firstDownload ? firstDownload.timestamp : null,
+      lastDownload: lastDownload ? lastDownload.timestamp : null
+    };
+  }
+
   getTopVideos(limit = 5) {
     if (!this.db) return [];
     return this.db.prepare(
       "SELECT video_id, title, COUNT(*) as downloads FROM downloads WHERE video_id IS NOT NULL GROUP BY video_id ORDER BY downloads DESC LIMIT ?"
     ).all(limit);
+  }
+
+  formatUserStatsText(stats) {
+    if (!stats) return '⚠️ Статистика недоступна';
+    if (stats.total === 0) return '📊 У вас пока нет скачиваний. Отправьте ссылку на видео!';
+
+    const fmtDate = (ts) => {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    let text = '📊 <b>Моя статистика</b>\n\n';
+    text += `📥 Всего скачиваний: <b>${stats.total}</b>\n\n`;
+    text += `🎬 YouTube: ${stats.youtube}\n`;
+    text += `📸 Instagram: ${stats.instagram}\n\n`;
+
+    if (stats.sponsorBlock > 0 || stats.trims > 0) {
+      text += '🛠 <b>Инструменты:</b>\n';
+      if (stats.sponsorBlock > 0) text += `  🎯 Без рекламы: ${stats.sponsorBlock} раз\n`;
+      if (stats.trims > 0) text += `  ✂️ Обрезки: ${stats.trims} раз\n`;
+      text += '\n';
+    }
+
+    text += `📅 Первое скачивание: ${fmtDate(stats.firstDownload)}\n`;
+    text += `📅 Последнее скачивание: ${fmtDate(stats.lastDownload)}\n`;
+
+    return text;
   }
 
   formatStatsText(stats) {
