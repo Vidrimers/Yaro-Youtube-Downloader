@@ -101,6 +101,8 @@ class BotController {
     this.youtubeWorkingSlots = new Set();
     this.instagramCookiesAlertSent = false;
     this.youtubeCookiesAlertSent = false;
+    this.youtubeCookiesFailCount = 0;
+    this.instagramCookiesFailCount = 0;
     
     // Инициализируем файловый сервер для больших файлов
     this.fileServer = new FileServer(
@@ -278,8 +280,10 @@ class BotController {
         });
 
         if (workingCount === 0) {
-          // Все слоты протухли
-          if (!this.youtubeCookiesAlertSent) {
+          // Все слоты протухли — считаем проваленные проверки
+          this.youtubeCookiesFailCount++;
+          Logger.warn('YouTube cookies check failed', { consecutiveFails: this.youtubeCookiesFailCount });
+          if (this.youtubeCookiesFailCount >= 2 && !this.youtubeCookiesAlertSent) {
             this.youtubeCookiesAlertSent = true;
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '🍪 <b>Все куки YouTube протухли!</b>\n\n' +
@@ -289,7 +293,8 @@ class BotController {
             );
           }
         } else {
-          // Есть рабочие слоты
+          // Есть рабочие слоты — сбрасываем счётчик
+          this.youtubeCookiesFailCount = 0;
           if (this.youtubeCookiesAlertSent) {
             this.youtubeCookiesAlertSent = false;
             Logger.info('YouTube cookies recovered');
@@ -338,8 +343,10 @@ class BotController {
         });
 
         if (workingCount === 0) {
-          // Все слоты протухли
-          if (!this.instagramCookiesAlertSent) {
+          // Все слоты протухли — считаем проваленные проверки
+          this.instagramCookiesFailCount++;
+          Logger.warn('Instagram cookies check failed', { consecutiveFails: this.instagramCookiesFailCount });
+          if (this.instagramCookiesFailCount >= 2 && !this.instagramCookiesAlertSent) {
             this.instagramCookiesAlertSent = true;
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '📸 <b>Все куки Instagram протухли!</b>\n\n' +
@@ -349,7 +356,8 @@ class BotController {
             );
           }
         } else {
-          // Есть рабочие слоты
+          // Есть рабочие слоты — сбрасываем счётчик
+          this.instagramCookiesFailCount = 0;
           if (this.instagramCookiesAlertSent) {
             this.instagramCookiesAlertSent = false;
             Logger.info('Instagram cookies recovered');
@@ -2040,21 +2048,29 @@ class BotController {
       ? 'https://www.instagram.com/reel/DU4hf2mjLFI/'
       : 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 
-    try {
-      const result = await new Promise((resolve) => {
-        const { spawn } = require('child_process');
-        const args = ['--no-warnings', '-j', '--cookies', cookiesPath, testUrl];
-        const proc = spawn('yt-dlp', args);
-        let stderr = '';
-        proc.stderr.on('data', (d) => { stderr += d.toString(); });
-        const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(false); }, 30000);
-        proc.on('close', (code) => { clearTimeout(timeout); resolve(code === 0); });
-        proc.on('error', () => { clearTimeout(timeout); resolve(false); });
-      });
-      return result;
-    } catch {
-      return false;
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await new Promise((resolve) => {
+          const { spawn } = require('child_process');
+          const args = ['--no-warnings', '-j', '--cookies', cookiesPath, testUrl];
+          const proc = spawn('yt-dlp', args);
+          let stderr = '';
+          proc.stderr.on('data', (d) => { stderr += d.toString(); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(false); }, 60000);
+          proc.on('close', (code) => { clearTimeout(timeout); resolve(code === 0); });
+          proc.on('error', () => { clearTimeout(timeout); resolve(false); });
+        });
+        if (result) return true;
+      } catch {
+        // продолжаем
+      }
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 5000));
+      }
     }
+    return false;
   }
 
   /**
