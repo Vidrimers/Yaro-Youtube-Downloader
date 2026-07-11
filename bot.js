@@ -1800,6 +1800,7 @@ class BotController {
 
         const quality = videoInfo.title ? 'instagram' : 'best';
         await this.telegramHelper.sendVideoFile(chatId, outputPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+        await this.telegramHelper.sendDonateButton(chatId);
 
         Logger.info('Instagram content sent to Telegram', { userId, videoId, fileSize });
 
@@ -1822,6 +1823,7 @@ class BotController {
 
           const quality = videoInfo.title ? 'instagram' : 'best';
           await this.telegramHelper.sendVideoFile(chatId, compressedPath, videoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+          await this.telegramHelper.sendDonateButton(chatId);
 
           Logger.info('Compressed Instagram content sent to Telegram', { userId, videoId, compressedSize });
 
@@ -1837,7 +1839,10 @@ class BotController {
             `📁 <b>Файл слишком большой для Telegram</b>\n\n` +
             `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
             `⏰ Ссылка действует до: ${expiresAt}`,
-            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }]] } }
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
+              [{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }],
+              [{ text: '💝 Донатная', callback_data: 'donate_menu' }]
+            ] } }
           );
         }
 
@@ -1861,7 +1866,10 @@ class BotController {
           `📁 <b>Файл слишком большой для Telegram</b>\n\n` +
           `📊 Размер: ${this.formatFileSize(fileSize)}\n` +
           `⏰ Ссылка действует до: ${expiresAt}`,
-          { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }]] } }
+          { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
+            [{ text: '⬇️ Скачать файл', url: linkInfo.downloadUrl }],
+            [{ text: '💝 Донатная', callback_data: 'donate_menu' }]
+          ] } }
         );
       }
       
@@ -1898,6 +1906,7 @@ class BotController {
               await this.telegramApi.sendChatAction(chatId, 'upload_video');
               const quality = videoInfo.title ? 'instagram' : 'best';
               await this.telegramHelper.sendVideoFile(chatId, outputPath, retryVideoInfo, quality, this.config.TELEGRAM_UPLOAD_TIMEOUT);
+              await this.telegramHelper.sendDonateButton(chatId);
               Logger.info('Instagram content sent to Telegram (after rotation)', { userId, videoId, fileSize: retryFileSize });
               return;
             }

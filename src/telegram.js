@@ -470,6 +470,21 @@ class TelegramHelper {
   }
 
   /**
+   * Отправляет сообщение с кнопкой доната
+   * @param {number} chatId - ID чата
+   * @returns {Promise<void>}
+   */
+  async sendDonateButton(chatId) {
+    await this.bot.sendMessage(chatId, '💝 Если вам понравился бот — поддержите проект:', {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '💝 Донатная', callback_data: 'donate_menu' }
+        ]]
+      }
+    });
+  }
+
+  /**
    * Отправляет приглашение ввести время начала обрезки
    * @param {number} chatId - ID чата
    * @returns {Promise<void>}
