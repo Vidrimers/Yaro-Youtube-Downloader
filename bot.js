@@ -1285,9 +1285,13 @@ class BotController {
       let downloaded = false;
       let lastError = null;
 
+      const targetHeight = format.height;
+      const heightFilter = targetHeight ? `[height<=${targetHeight}]` : '';
       const formatsToTry = [
-        `${format.format_id}+bestaudio/best`,
-        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        // Prefer H.264 — compatible with all devices including iPhone
+        `bestvideo[ext=mp4][vcodec~="avc1|h264"]${heightFilter}+bestaudio[ext=m4a]/bestvideo[vcodec~="avc1|h264"]${heightFilter}+bestaudio/best[ext=mp4][vcodec~="avc1|h264"]/best[ext=mp4]/best`,
+        // Fallback: user's selected format (may use VP9/AV1 — broken on iPhone)
+        `${format.format_id}+bestaudio[ext=m4a]/bestaudio/best`
       ];
 
       for (const fmt of formatsToTry) {
@@ -1622,7 +1626,7 @@ class BotController {
           const combinedOutputPath = this.fileManager.generateFilePath(videoInfo.id, 'fallback.mp4');
           const cookiesFile = this.getActiveCookiesPath('youtube') || undefined;
           const fallbackArgs = [
-            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            '-f', 'bestvideo[ext=mp4][vcodec~="avc1|h264"]+bestaudio[ext=m4a]/bestvideo[vcodec~="avc1|h264"]+bestaudio/best[ext=mp4][vcodec~="avc1|h264"]/best[ext=mp4]/best',
             '--merge-output-format', 'mp4',
             '-o', combinedOutputPath,
             '--no-warnings'

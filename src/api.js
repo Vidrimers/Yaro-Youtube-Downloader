@@ -188,8 +188,9 @@ class ExtensionAPI {
       // Use yt-dlp's merge for all formats to avoid 403 on video-only streams
       // Let yt-dlp handle format selection and merging internally
       try {
+        const heightFilter = format.height ? `[height<=${format.height}]` : '';
         const mergeArgs = [
-          '-f', `${format.format_id}+bestaudio/best`,
+          '-f', `bestvideo[ext=mp4][vcodec~="avc1|h264"]${heightFilter}+bestaudio[ext=m4a]/bestvideo[vcodec~="avc1|h264"]${heightFilter}+bestaudio/best[ext=mp4][vcodec~="avc1|h264"]/best[ext=mp4]/best`,
           '--merge-output-format', 'mp4',
           '-o', videoPath,
           '--no-warnings'
@@ -202,7 +203,7 @@ class ExtensionAPI {
         Logger.warn('Format download failed, trying best available', { error: dlError.message, formatId: format.format_id });
         // Fallback: let yt-dlp choose the best format
         const fallbackArgs = [
-          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+          '-f', 'bestvideo[ext=mp4][vcodec~="avc1|h264"]+bestaudio[ext=m4a]/bestvideo[vcodec~="avc1|h264"]+bestaudio/best[ext=mp4][vcodec~="avc1|h264"]/best[ext=mp4]/best',
           '--merge-output-format', 'mp4',
           '-o', videoPath,
           '--no-warnings'
