@@ -283,7 +283,7 @@ class BotController {
           // Все слоты протухли — считаем проваленные проверки
           this.youtubeCookiesFailCount++;
           Logger.warn('YouTube cookies check failed', { consecutiveFails: this.youtubeCookiesFailCount });
-          if (this.youtubeCookiesFailCount >= 2 && !this.youtubeCookiesAlertSent) {
+          if (this.youtubeCookiesFailCount >= 4 && !this.youtubeCookiesAlertSent) {
             this.youtubeCookiesAlertSent = true;
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '🍪 <b>Все куки YouTube протухли!</b>\n\n' +
@@ -315,7 +315,7 @@ class BotController {
       }
     };
 
-    setTimeout(check, 60 * 1000);
+    setTimeout(check, 3 * 60 * 1000);
     setInterval(check, CHECK_INTERVAL);
     Logger.info('YouTube cookies health check started', { interval: `${CHECK_INTERVAL / 3600000}h` });
   }
@@ -346,7 +346,7 @@ class BotController {
           // Все слоты протухли — считаем проваленные проверки
           this.instagramCookiesFailCount++;
           Logger.warn('Instagram cookies check failed', { consecutiveFails: this.instagramCookiesFailCount });
-          if (this.instagramCookiesFailCount >= 2 && !this.instagramCookiesAlertSent) {
+          if (this.instagramCookiesFailCount >= 4 && !this.instagramCookiesAlertSent) {
             this.instagramCookiesAlertSent = true;
             await this.telegramApi.sendMessage(this.config.TELEGRAM_ADMIN_ID,
               '📸 <b>Все куки Instagram протухли!</b>\n\n' +
@@ -2043,10 +2043,10 @@ class BotController {
       ? this.config.INSTAGRAM_COOKIES[index]
       : this.config.YOUTUBE_COOKIES[index];
 
-    if (!cookiesPath) return false;
+    if (!cookiesPath) return { ok: false, reason: 'no_path' };
 
     const fs = require('fs').promises;
-    try { await fs.access(cookiesPath); } catch { return false; }
+    try { await fs.access(cookiesPath); } catch { return { ok: false, reason: 'no_file' }; }
 
     const testUrl = platform === 'instagram'
       ? 'https://www.instagram.com/reel/DU4hf2mjLFI/'
@@ -2062,19 +2062,34 @@ class BotController {
           const proc = spawn('yt-dlp', args);
           let stderr = '';
           proc.stderr.on('data', (d) => { stderr += d.toString(); });
-          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve(false); }, 60000);
-          proc.on('close', (code) => { clearTimeout(timeout); resolve(code === 0); });
-          proc.on('error', () => { clearTimeout(timeout); resolve(false); });
+          const timeout = setTimeout(() => { proc.kill('SIGKILL'); resolve({ ok: false, reason: 'timeout' }); }, 60000);
+          proc.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code === 0) {
+              resolve({ ok: true, reason: 'ok' });
+            } else {
+              const errLower = stderr.toLowerCase();
+              const isCookiesError = errLower.includes('sign in') ||
+                errLower.includes('403') ||
+                errLower.includes('login') ||
+                errLower.includes('private') ||
+                errLower.includes('confirm your') ||
+                errLower.includes('inicia sesi');
+              resolve({ ok: false, reason: isCookiesError ? 'cookies_expired' : 'yt_dlp_error', stderr: stderr.slice(0, 300) });
+            }
+          });
+          proc.on('error', (e) => { clearTimeout(timeout); resolve({ ok: false, reason: 'spawn_error', stderr: e.message }); });
         });
-        if (result) return true;
-      } catch {
+        if (result.ok) return result;
+        if (result.reason === 'cookies_expired') return result;
+      } catch (e) {
         // продолжаем
       }
       if (attempt < maxAttempts) {
         await new Promise(r => setTimeout(r, 5000));
       }
     }
-    return false;
+    return { ok: false, reason: 'failed' };
   }
 
   /**
@@ -2087,10 +2102,31 @@ class BotController {
       ? this.config.INSTAGRAM_COOKIES
       : this.config.YOUTUBE_COOKIES;
     const working = new Set();
+    const errors = [];
 
     for (let i = 0; i < cookies.length; i++) {
-      const ok = await this.testCookiesSlot(platform, i);
-      if (ok) working.add(i);
+      const result = await this.testCookiesSlot(platform, i);
+      if (result.ok) {
+        working.add(i);
+      } else if (result.reason !== 'no_file' && result.reason !== 'no_path') {
+        errors.push({ slot: i, reason: result.reason, stderr: result.stderr });
+      }
+      if (i < cookies.length - 1) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    if (errors.length > 0) {
+      Logger.warn(`${platform} cookies check details`, {
+        working: working.size,
+        total: cookies.length,
+        errors: errors.map(e => `slot${e.slot}:${e.reason}`)
+      });
+      for (const e of errors) {
+        if (e.stderr) {
+          Logger.warn(`${platform} slot ${e.slot} stderr: ${e.stderr}`);
+        }
+      }
     }
 
     return working;
