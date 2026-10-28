@@ -158,14 +158,21 @@ class CryptoApiClient {
   /**
    * Кодирует TRON адрес для вызова смарт-контракта
    * @private
-   * @param {string} address - TRON адрес
-   * @returns {string} - закодированный адрес
+   * @param {string} address - TRON адрес (base58check)
+   * @returns {string|null} - hex-кодирование 20-байтового адреса, паддинг до 64 символов
    */
   encodeAddress(address) {
-    // Простое кодирование адреса для TRON API
-    // Убираем префикс T и дополняем нулями до 64 символов
-    const cleanAddress = address.replace(/^T/, '41');
-    return cleanAddress.padStart(64, '0');
+    // base58check → 25 байт (0x41 + 20 байт адреса + 4 байта checksum),
+    // отрезаем версию и checksum, паддингуем hex до 32 байт
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let n = 0n;
+    for (const c of String(address)) {
+      const i = ALPHABET.indexOf(c);
+      if (i < 0) return null;
+      n = n * 58n + BigInt(i);
+    }
+    const hex = n.toString(16).padStart(50, '0');
+    return hex.slice(2, 42).padStart(64, '0');
   }
 
   /**

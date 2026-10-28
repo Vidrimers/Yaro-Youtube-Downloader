@@ -82,12 +82,12 @@ describe('CryptoApiClient', () => {
   });
 
   describe('encodeAddress', () => {
-    test('должен кодировать TRON адрес', () => {
+    test('должен кодировать TRON адрес в hex-параметр для контракта', () => {
       const address = 'TYYvAa7u8agTheFHoJK6sGqPV2E6UJd6Er';
       const encoded = cryptoApi.encodeAddress(address);
       
       expect(encoded).toHaveLength(64);
-      expect(encoded).toContain('41YYvAa7u8agTheFHoJK6sGqPV2E6UJd6Er');
+      expect(encoded).toBe('000000000000000000000000f7b2db20e89116fb6f917e53539e942c54e965f6');
     });
   });
 
