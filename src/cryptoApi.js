@@ -120,6 +120,8 @@ class CryptoApiClient {
       const response = await axios.post(
         `${this.config.TRON_API_URL}/wallet/triggerconstantcontract`,
         {
+          // visible: true — адреса в base58, иначе TronGrid читает их как hex и отвечает TRC-20 error
+          visible: true,
           owner_address: address,
           contract_address: usdtContractAddress,
           function_selector: 'balanceOf(address)',
