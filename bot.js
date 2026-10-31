@@ -3173,16 +3173,17 @@ class BotController {
             this.youtubeWorkingSlots.add(slotIndex);
           }
 
-          // Определяем имя аккаунта
+          // Определяем имя аккаунта (не перезаписываем существующее)
           const accountName = await this.detectAccountName(platform, slotIndex);
-          if (accountName) {
-            const labels = await this.loadCookieLabels();
-            if (!labels[platform]) labels[platform] = {};
+          const labels = await this.loadCookieLabels();
+          if (!labels[platform]) labels[platform] = {};
+          if (!labels[platform][slotIndex] && accountName) {
             labels[platform][slotIndex] = accountName;
             await this.saveCookieLabels(labels);
           }
+          const displayName = labels[platform][slotIndex] || accountName || '';
 
-          const nameStr = accountName ? ` (${accountName})` : '';
+          const nameStr = displayName ? ` (${displayName})` : '';
           await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} слот #${slotIndex + 1} работают!${nameStr}`);
         } catch (e) {
           // Убираем из рабочих
