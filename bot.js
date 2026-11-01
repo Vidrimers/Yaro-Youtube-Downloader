@@ -1046,6 +1046,22 @@ class BotController {
         return;
       }
 
+      // Оставить текущее имя слота
+      if (callbackData.startsWith('keep_label_')) {
+        if (this.config.TELEGRAM_ADMIN_ID && userId !== this.config.TELEGRAM_ADMIN_ID) {
+          await this.telegramApi.answerCallbackQuery(query.id, { text: 'Доступ запрещен' });
+          return;
+        }
+        const parts = callbackData.split('_');
+        const platform = parts[2];
+        const slotIndex = parseInt(parts[3]);
+        await this.telegramApi.answerCallbackQuery(query.id, { text: 'Имя оставлено' });
+        await this.telegramApi.sendMessage(chatId,
+          `✅ Имя слота ${platform === 'instagram' ? 'Instagram' : 'YouTube'} #${slotIndex + 1} сохранено.`
+        );
+        return;
+      }
+
       // Переименование слота куков: rename_cookie_instagram_0 ... rename_cookie_youtube_9
       if (callbackData.startsWith('rename_cookie_')) {
         if (this.config.TELEGRAM_ADMIN_ID && userId !== this.config.TELEGRAM_ADMIN_ID) {
@@ -3173,18 +3189,25 @@ class BotController {
             this.youtubeWorkingSlots.add(slotIndex);
           }
 
-          // Определяем имя аккаунта (не перезаписываем существующее)
-          const accountName = await this.detectAccountName(platform, slotIndex);
+          // Показываем кнопки для выбора имени
           const labels = await this.loadCookieLabels();
-          if (!labels[platform]) labels[platform] = {};
-          if (!labels[platform][slotIndex] && accountName) {
-            labels[platform][slotIndex] = accountName;
-            await this.saveCookieLabels(labels);
-          }
-          const displayName = labels[platform][slotIndex] || accountName || '';
+          const existingName = labels[platform]?.[slotIndex] || '';
 
-          const nameStr = displayName ? ` (${displayName})` : '';
-          await this.telegramApi.sendMessage(chatId, `✅ Куки ${label} слот #${slotIndex + 1} работают!${nameStr}`);
+          const keyboard = { inline_keyboard: [] };
+          if (existingName) {
+            keyboard.inline_keyboard.push([
+              { text: `Оставить "${existingName}"`, callback_data: `keep_label_${platform}_${slotIndex}` }
+            ]);
+          }
+          keyboard.inline_keyboard.push([
+            { text: 'Задать имя', callback_data: `rename_cookie_${platform}_${slotIndex}` }
+          ]);
+
+          await this.telegramApi.sendMessage(chatId,
+            `✅ <b>Куки ${label} слот #${slotIndex + 1} работают!</b>` +
+            (existingName ? `\n\nТекущее имя: <b>${existingName}</b>` : ''),
+            { parse_mode: 'HTML', reply_markup: keyboard }
+          );
         } catch (e) {
           // Убираем из рабочих
           if (isInstagram) {
