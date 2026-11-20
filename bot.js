@@ -201,10 +201,8 @@ class BotController {
       this.handleCallbackQuery(query);
     });
     
-    // Обработчик ошибок polling
-    this.bot.on('polling_error', (error) => {
-      Logger.error('Polling error', error);
-    });
+    // Обработчик ошибок polling + watchdog для восстановления зависшего опроса
+    this.setupPollingGuard();
     
     Logger.info('Bot handlers registered successfully');
 
@@ -255,6 +253,83 @@ class BotController {
       interval: this.config.CLEANUP_INTERVAL,
       maxAge: this.config.FILE_MAX_AGE
     });
+  }
+
+  /**
+   * Защита long-polling от молчаливых зависаний.
+   * node-telegram-bot-api не ставит таймаут на запрос getUpdates: после сетевого
+   * сбока (ECONNRESET и т.п.) запрос может зависнуть навсегда, цикл опроса
+   * перестаёт выполняться без единой ошибки, и бот "молчит", оставаясь online.
+   * Решение: собственный таймаут на каждый getUpdates + watchdog-интервал,
+   * перезапускающий polling при простое.
+   */
+  setupPollingGuard() {
+    const POLLING_STALE_MS = 120 * 1000; // нет успешного опроса 2 минуты = зависание
+    const WATCHDOG_INTERVAL_MS = 60 * 1000;
+    const GET_UPDATES_TIMEOUT_MS = 60 * 1000;
+
+    this._lastPollingOkAt = Date.now();
+    this._pollingRestartInFlight = false;
+
+    // Таймаут на каждый вызов getUpdates: зависший запрос становится ошибкой
+    // и прерывается (abort), чтобы не конфликтовать со следующим опросом (409).
+    // Штатный цикл библиотеки после ошибки продолжит опрос через polling_error.
+    const origGetUpdates = this.bot.getUpdates.bind(this.bot);
+    this.bot.getUpdates = (...args) => {
+      const requestPromise = origGetUpdates(...args);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (typeof requestPromise.cancel === 'function') {
+            requestPromise.cancel();
+          }
+          reject(new Error(`getUpdates timeout after ${GET_UPDATES_TIMEOUT_MS}ms`));
+        }, GET_UPDATES_TIMEOUT_MS);
+        requestPromise.then(
+          (res) => { clearTimeout(timer); this._lastPollingOkAt = Date.now(); resolve(res); },
+          (err) => { clearTimeout(timer); reject(err); }
+        );
+      });
+    };
+
+    this.bot.on('polling_error', (error) => {
+      Logger.error('Polling error', error);
+    });
+
+    this._pollingWatchdog = setInterval(() => {
+      if (this._pollingRestartInFlight) return;
+      const staleForMs = Date.now() - this._lastPollingOkAt;
+      const isPolling = this.bot.isPolling();
+      if (!isPolling || staleForMs > POLLING_STALE_MS) {
+        this.restartPolling(isPolling ? 'stale' : 'not_polling', staleForMs);
+      }
+    }, WATCHDOG_INTERVAL_MS);
+
+    Logger.info('Polling guard started', {
+      getUpdatesTimeoutMs: GET_UPDATES_TIMEOUT_MS,
+      staleAfterMs: POLLING_STALE_MS
+    });
+  }
+
+  /**
+   * Перезапуск long-polling (для watchdog)
+   * stopPolling() без cancel дожидается завершения текущего запроса (не дольше
+   * таймаута getUpdates) и блокирует повторный запуск цикла самой библиотекой,
+   * поэтому startPolling() даёт ровно один новый цикл опроса.
+   */
+  async restartPolling(reason, staleForMs) {
+    if (this._pollingRestartInFlight) return;
+    this._pollingRestartInFlight = true;
+    try {
+      Logger.warn('Restarting Telegram polling', { reason, staleForMs });
+      await this.bot.stopPolling();
+      await this.bot.startPolling();
+      this._lastPollingOkAt = Date.now();
+      this._pollingRestartInFlight = false;
+      Logger.info('Telegram polling restarted successfully');
+    } catch (error) {
+      this._pollingRestartInFlight = false;
+      Logger.error('Failed to restart Telegram polling', error);
+    }
   }
 
   /**
